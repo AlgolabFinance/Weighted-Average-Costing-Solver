@@ -9,7 +9,7 @@ import pandas as pd
 import numpy as np
 import requests
 import json
-import datetime
+from datetime import datetime, timedelta
 import pytz
 import aiohttp
 import asyncio
@@ -30,18 +30,19 @@ async def lookupFMV_Kaiko(date, token_symbol, before, after):
     price_dict_key = date + '-' + token_symbol
     if price_dict_key in price_set:
         return
-    Time = datetime.datetime.strptime(str(date), '%Y-%m-%dT%H:%M:%SZ')
-    start_time = Time - datetime.timedelta(hours=before)
+    Time = datetime.strptime(str(date), '%Y-%m-%dT%H:%M:%SZ')
+    start_time = Time - timedelta(hours=before)
     start_time = str(start_time.strftime('%Y-%m-%dT%H:%M:%SZ'))
-    end_time = Time + datetime.timedelta(hours=after)
+    end_time = Time + timedelta(hours=after)
     end_time = str(end_time.strftime('%Y-%m-%dT%H:%M:%SZ'))
-    timestamp = int(datetime.datetime.timestamp(Time))
-    tx_url = "https://us.market-api.kaiko.io/v1/data/trades.v1/spot_exchange_rate/" + \
-             str(token_symbol).lower() + "/usd?interval=1m&page_size=1000"
-    params = dict({"start_time": start_time, "end_time": end_time})
+    tx_url = f"https://us.market-api.kaiko.io/v1/data/trades.v1/spot_exchange_rate/{}/usd"
+    params = dict({"start_time": start_time,
+                    "end_time": end_time,
+                    "interval": "1m",
+                    "page_size": 1000})
     headers = {'x-api-key': 'b45d6e160228c4514fd747d8ab16cd08'}
     async with aiohttp.ClientSession(headers=headers) as session:
-        async with session.get(tx_url, headers=headers, params=params) as response:
+        async with session.get(tx_url.format(str(token_symbol).lower()), headers=headers, params=params) as response:
             text = await response.text()
             if response.status != 200:
                 if response.status == 400:
@@ -66,7 +67,7 @@ async def look_up_price(date, token_symbol):
     identifier = str(date) + '-' + token_symbol
     if identifier in price_dict:
         return price_dict[identifier]
-    Time = datetime.datetime.strptime(str(date), '%Y-%m-%dT%H:%M:%SZ')
+    Time = datetime.strptime(str(date), '%Y-%m-%dT%H:%M:%SZ')
     target_data = dataset[dataset['identifier'] == identifier]
     if len(target_data) == 0:
         price_dict[identifier] = (0, 0)
@@ -74,8 +75,13 @@ async def look_up_price(date, token_symbol):
     target_data['datetime'] = ''
     target_data['delta'] = 0.0
     Time = Time.replace(tzinfo=pytz.utc)
+    '''
+    try:
+    import calendar
+    start_date = calendar.timegm(start_date.timetuple())
+    '''
     for i in target_data.index:
-        target_data.loc[i, 'datetime'] = datetime.datetime.fromtimestamp(int(target_data['timestamp'][i]) / 1000, tz=pytz.utc)
+        target_data.loc[i, 'datetime'] = datetime.fromtimestamp(int(target_data['timestamp'][i]) / 1000, tz=pytz.utc)
         target_data.loc[i, 'delta'] = abs(float((target_data['datetime'][i] - Time).total_seconds() / 3600))
     price = target_data['price'][target_data['delta'] == target_data['delta'].min()].to_list()[0]
     delta = target_data['delta'].min()
@@ -91,6 +97,9 @@ async def get_fmv_data(data, row_index):
     row = data.iloc[row_index]
     incomplete_set.remove(row_index)
     symbol_list = []
+
+#// TODO: stack datetime, debitAsset, creditAsset, txFeeAsset then remove_duplicates 
+
     if not pd.isna(row['debitAsset']):
         symbol_list.append(row['debitAsset'])
     if (not pd.isna(row['creditAsset'])) and row['creditAsset'] != 'USD':
@@ -110,7 +119,8 @@ async def get_fmv_data(data, row_index):
 async def main(task_list):
     await asyncio.gather(*task_list)
 
-async def set_price_value(data, row_index):
+#// TODO: keep all dataframe formatting outside of the loop, instead, apply function to all dataframe once 
+async def set_price_value(data, row_index): 
     row = data.iloc[row_index]
     symbol_dict = dict()
     if not pd.isna(row['debitAsset']):
@@ -141,7 +151,7 @@ if __name__ == '__main__':
     loop.run_until_complete(main(task_list))
     task_list = [loop.create_task(get_fmv_data(data, i)) for i in incomplete_set]
     loop.run_until_complete(main(task_list))
-    set_value_list = [loop.create_task(set_price_value(data, i)) for i in range(start, end + 1)]
+    set_value_list = [loop.create_task(set_price_value(data, i)) for i in range(start, end + 1)] 
     loop.run_until_complete(main(set_value_list))
     loop.close()
     print('total time:')
