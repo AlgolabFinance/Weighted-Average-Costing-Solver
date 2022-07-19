@@ -18,14 +18,11 @@ import asyncio
 
 pd.set_option('display.max_columns', None)
 incomplete_set = set()
-price_dict = dict()
 
 
 async def lookupFMV_Kaiko(date, token_symbol, before, after):
     date = str(date)[0:19] + "Z"
     price_dict_key = date + '-' + token_symbol
-    if price_dict_key in price_dict:
-        return price_dict[price_dict_key]
     target_time = datetime.strptime(str(date), '%Y-%m-%dT%H:%M:%SZ')
     start_time = target_time - timedelta(hours=before)
     start_time = str(start_time.strftime('%Y-%m-%dT%H:%M:%SZ'))
@@ -42,7 +39,6 @@ async def lookupFMV_Kaiko(date, token_symbol, before, after):
             text = await response.text()
             if response.status != 200:
                 if response.status == 400:
-                    price_dict[price_dict_key] = (0, 0)
                     return 0, 0
                 else:
                     print(response.status)
@@ -58,7 +54,6 @@ async def lookupFMV_Kaiko(date, token_symbol, before, after):
                 delta = str("{:.2f}".format(delta * 60)) + ' minutes'
             else:
                 delta = str("{:.2f}".format(delta)) + ' hours'
-            price_dict[price_dict_key] = (price, delta)
             return price, delta
 
 
