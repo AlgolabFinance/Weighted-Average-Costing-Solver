@@ -27,7 +27,7 @@ class CGL:
             previous_movement_index = target_account_records.index.tolist()[-1]
         return amount, value_per_unit, previous_movement_index
 
-    def update_balance_tracker(self, account, asset, amount_changed, value_changed, txHash, id, datetime, cgl = 0):
+    def update_balance_tracker(self, account, asset, amount_changed, value_changed, txHash, id, datetime, cgl=0):
         original_amount, original_value_per_unit, previous_movement_index = self.get_latest_balance(account, asset)
         new_balance = original_amount + amount_changed
 
@@ -149,7 +149,8 @@ class CGL:
         cost = credit_amount * value_per_unit
         CGL = proceeds - cost
         # self.add_value_to_account(credit_account, credit_asset, -1*credit_amount, -1*cost)
-        self.update_balance_tracker(credit_account, credit_asset, -1 * credit_amount, -1 * cost, tx_hash, id, datetime, CGL)
+        self.update_balance_tracker(credit_account, credit_asset, -1 * credit_amount, -1 * cost, tx_hash, id, datetime,
+                                    CGL)
         if tx_type == 'Trade':
             # self.add_value_to_account(debit_account, debit_asset, debit_amount, proceeds)
             self.update_balance_tracker(debit_account, debit_asset, debit_amount, proceeds, tx_hash, id, datetime)
@@ -173,12 +174,12 @@ class CGL:
             if tx_type in ['Trade', 'Sell']:
                 cgl = self.calculate_CGL(record)
                 self.data.loc[index, 'Capital G&L'] = cgl
-            elif tx_type == 'Withdrawal' and 'Expense' in debit_account:
+            elif tx_type == 'Withdrawal':
                 balance, value_per_unit, _ = self.get_latest_balance(credit_account, credit_asset)
                 self.update_balance_tracker(credit_account, credit_asset, -1 * credit_amount,
                                             -1 * value_per_unit * credit_amount, tx_hash, id, datetime)
 
-            elif tx_type == 'Deposit' and 'Income' in credit_account:
+            elif tx_type == 'Deposit':
                 self.update_balance_tracker(debit_account, debit_asset, debit_amount, debit_amount * FMV
                                             , tx_hash, id, datetime)
 
@@ -209,25 +210,22 @@ class CGL:
         self.movement_tracker.to_csv('movement_tracker.csv')
 
     def generate_transactions_report(self):
-        tx_report = pd.DataFrame(
-            {'Account': [], 'Asset': [], 'Datetime': [], 'Current Balance': [],
-             'Average Value': [], 'Total Value': [],
-             'Balance Before Change': [], 'Total Value Before Change': [], 'Balance Changed': [],
-             'Value Changed': []})
-        tracker_book = pd.read_csv('movement_tracker.csv')
-        for i, row in tracker_book.iterrows():
-            temp_dict = dict()
-            temp_dict['Account'] = [row.account]
-            temp_dict['Asset'] = [row.asset]
-            temp_dict['Datetime'] = [row.datetime]
-            temp_dict['Current Balance'] = [row.current_balance]
-            temp_dict['Average Value'] = [row.value_per_unit]
-            temp_dict['Total Value'] = [row.current_value]
-            temp_dict['Balance Before Change'] = [row.previous_balance]
-            temp_dict['Total Value Before Change'] = [row.previous_value * row.previous_balance]
-            temp_dict['Balance Changed'] = [row.amount_changed]
-            temp_dict['Value Changed'] = [row.value_changed]
-            tx_report = pd.concat([tx_report, pd.DataFrame(temp_dict)], ignore_index=True)
+        # tx_report = pd.DataFrame(
+        #     {'Account': [], 'Asset': [], 'Datetime': [], 'Current Balance': [],
+        #      'Average Value': [], 'Total Value': [],
+        #      'Balance Before Change': [], 'Total Value Before Change': [], 'Balance Changed': [],
+        #      'Value Changed': []})
+        # tracker_book = pd.read_csv('movement_tracker.csv')
+        tx_report = pd.read_csv('movement_tracker.csv')
+        tx_report = tx_report[['account', 'asset', 'datetime', 'current_balance', 'value_per_unit',
+                                      'current_value', 'previous_balance', 'amount_changed', 'value_changed',
+                               'previous_value']]
+        tx_report['Total Value Before Change'] = tx_report['previous_value'] * tx_report['previous_balance']
+        tx_report.drop('previous_value', axis=1, inplace=True)
+        tx_report.rename(columns={'account': 'Account', 'asset': 'Asset', 'datetime': 'Datetime',
+                                  'current_balance': 'Current Balance', 'value_per_unit': 'Average Value',
+                                      'current_value': 'Total Value', 'previous_balance':'Balance Before Change'
+                                    , 'amount_changed': 'Balance Changed', 'value_changed': 'Value Changed',}, inplace=True)
         tx_report.set_index(['Account', 'Asset', 'Datetime'], inplace=True)
         tx_report.sort_index(inplace=True)
         tx_report.reset_index(inplace=True)
@@ -236,7 +234,7 @@ class CGL:
     def generate_cgl_report(self, file_name):
         cgl_report = pd.DataFrame(
             {'coin_location': [], 'asset': [], 'original_purchase_date': [], 'current_balance': [],
-              'total_coin': [], 'basis_per_coin': [],
+             'total_coin': [], 'basis_per_coin': [],
              'basis_balance': [], 'proceeds_per_coin': [], 'total_proceeds': [],
              'cgl': []})
         cgl_book = pd.read_csv(file_name)
@@ -260,7 +258,7 @@ if __name__ == '__main__':
     cgl = CGL()
     cgl.read_data('test_v4.csv')
     cgl.execute_calculation()
-    # print(cgl.movement_tracker)
-    # print(cgl.data)
+    # # print(cgl.movement_tracker)
+    # # print(cgl.data)
     cgl.write_to_file('result_v4.csv')
     cgl.generate_transactions_report()
