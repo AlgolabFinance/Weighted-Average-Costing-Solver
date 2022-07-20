@@ -63,7 +63,7 @@ async def lookupFMV_Kaiko(date, token_symbol, before, after):
 
 
 async def add_fmv(data, row_index):
-    interval = 3
+    interval = 8
     row = data.iloc[row_index]
     incomplete_set.remove(row_index)
     try:

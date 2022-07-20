@@ -1,24 +1,25 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Tue Jul 12 17:59:01 2022
-
-@author: Crypto
-"""
+import base64
+import io
+from io import StringIO
+import pandas as pd
 import time
 import calendar
-
-import pandas as pd
-import numpy as np
-import requests
 import json
 from datetime import datetime, timedelta
-import pytz
-import aiohttp
+import contextvars
 import asyncio
+import aiohttp
+import streamlit as st
+# from histFMVV4 import *
 
-pd.set_option('display.max_columns', None)
-incomplete_set = set()
-
+file_type = 'csv'
+# loop = asyncio.new_event_loop()
+# asyncio.set_event_loop(loop)
+incomplete_set = contextvars.ContextVar('incomplete_set')
+semaphore = contextvars.ContextVar('semaphore')
+task_list = contextvars.ContextVar('task_list')
+# semaphore = asyncio.Semaphore(2000)
+uploaded_file = st.file_uploader("Please upload {0} file".format(file_type), type=['csv'], key='uploader')
 
 async def lookupFMV_Kaiko(date, token_symbol, before, after):
     date = str(date)[0:19] + "Z"
@@ -34,7 +35,8 @@ async def lookupFMV_Kaiko(date, token_symbol, before, after):
                    "interval": "1m",
                    "page_size": 1000})
     headers = {'x-api-key': 'b45d6e160228c4514fd747d8ab16cd08'}
-    async with semaphore:
+    global semaphore
+    async with semaphore.get():
         async with aiohttp.ClientSession(headers=headers) as session:
             async with session.get(tx_url.format(str(token_symbol).lower()), headers=headers, params=params) as response:
                 text = await response.text()
@@ -71,20 +73,24 @@ async def get_fmv(lookup, row_index, window=1):
         lookup.loc[row_index, 'fmv'], _ = await lookupFMV_Kaiko(row['datetime'], row['token_symbol'], window / 2,
                                                                 window / 2)
     except Exception as err:
-        incomplete_set.add(row_index)
+        incomplete_set.get().add(row_index)
         lookup.loc[row_index, 'fmv'] = -1
         print(row['fmv_id'] + ': ' + str(err))
+        # st.write('Failure: ' + row['fmv_id'] + ': ' + str(err))
     else:
-        incomplete_set.remove(row_index)
+        incomplete_set.get().remove(row_index)
 
 
-def execute(file_name, maximum_attempt=5):
+def execute(data, maximum_attempt=5):
     global incomplete_set
+    global semaphore
+    global task_list
     attempts = 0
     default_window = 1
     default_error_window = 16
     start_time = time.perf_counter()
-    data = pd.read_csv(file_name)
+    # data = pd.read_csv(file_name)
+    #st.header('Preprocessing uploaded data...')
     data['debitAssetId'] = data['datetime'] + '-' + data['debitAsset']
     data['creditAssetId'] = data['datetime'] + '-' + data['creditAsset']
     data['txFeeAssetId'] = data['datetime'] + '-' + data['txFeeAsset']
@@ -99,22 +105,31 @@ def execute(file_name, maximum_attempt=5):
     print('Number of records to look up: ' + str(len(lookup)))
     start = 0
     end = len(lookup)
-    incomplete_set = set([i for i in range(start, end)])
-    loop = asyncio.get_event_loop()
-    task_list = [loop.create_task(get_fmv(lookup, i, window=default_window)) for i in range(start, end)]
-    loop.run_until_complete(main(task_list))
+    # st.write('Downloading data...')
+    incomplete_set.set(set([i for i in range(start, end)]))
+    semaphore.set(asyncio.Semaphore(2000))
+    #loop = asyncio.get_event_loop()
+    # loop = asyncio.get_running_loop()
+    task_list.set([get_fmv(lookup, i, window=default_window) for i in range(start, end)])
+    # loop.run_until_complete(main(task_list))
+    asyncio.run(main(task_list.get()))
     err_window = 4
-    while len(incomplete_set) > 0 and attempts < maximum_attempt:
-        task_list = [loop.create_task(get_fmv(lookup, i, window=err_window)) for i in incomplete_set]
-        loop.run_until_complete(main(task_list))
+    #st.header('Redoing the failed requests...')
+    while len(incomplete_set.get()) > 0 and attempts < maximum_attempt:
+        task_list.set([get_fmv(lookup, i, window=err_window) for i in incomplete_set.get()])
+        # loop.run_until_complete(main(task_list))
+        asyncio.run(main(task_list.get()))
         attempts += 1
         err_window = min(16, err_window * 2)
-    loop.close()
+    #st.header('Download finished')
+    #st.header('total time: ' + str(time.perf_counter() - start_time))
+    #st.header('Failures Remained: ' + str(len(incomplete_set)))
     print('total time: ' + str(time.perf_counter() - start_time))
-    print('Failures Remained: ' + str(len(incomplete_set)))
-    print(incomplete_set)
-    for i in incomplete_set:
+    print('Failures Remained: ' + str(len(incomplete_set.get())))
+    print(incomplete_set.get())
+    for i in incomplete_set.get():
         print(lookup.iloc[i])
+    #st.header('Merging Data..')
     start_time = time.perf_counter()
     data = pd.merge(data, lookup[['fmv_id', 'fmv']], how='left', left_on='debitAssetId', right_on='fmv_id')
     data.rename(columns={'fmv': 'debitAssetFMV'}, inplace=True)
@@ -125,13 +140,42 @@ def execute(file_name, maximum_attempt=5):
     data = pd.merge(data, lookup[['fmv_id', 'fmv']], how='left', left_on='txFeeAssetId', right_on='fmv_id')
     data.rename(columns={'fmv': 'txFeeAssetFMV'}, inplace=True)
     data.drop(columns=['fmv_id', 'creditAssetId', 'debitAssetId', 'txFeeAssetId'], inplace=True, axis=1)
-    data.to_csv('FMV_output.csv')
     print('Time to merge data: ' + str(time.perf_counter() - start_time))
+    #st.header('Succeed!')
+    return data
 
-# 27917 records in total, 27341 records to look up FMV after removing duplication
-# Done in 685 seconds
-# 14 failed in the end
-if __name__ == '__main__':
-    semaphore = asyncio.Semaphore(2000)
-    file_name = 'Bulk Upload v2.csv'
-    execute(file_name, 8)
+
+def get_table_download_link_csv(df, file_name='output'):
+    """Generates a link allowing the data in a given panda dataframe to be downloaded
+    in:  dataframe
+    out: href string
+    """
+    csv = df.to_csv(index=False)
+    b64 = base64.b64encode(csv.encode()).decode()  # some strings <-> bytes conversions necessary here
+    file_name += '.csv'
+    return f'<a href="data:file/csv;base64,{b64}" download={file_name}>Download FMV.csv</a>'
+
+
+def get_table_download_link_excel(df, file_name = 'output'):
+    """Generates a link allowing the data in a given panda dataframe to be downloaded
+    in:  dataframe
+    out: href string
+    """
+    towrite = io.BytesIO()
+    file_excel = df.to_excel(towrite, encoding='utf-8', index=False, header=True)
+    towrite.seek(0) # reset pointer
+    b64 = base64.b64encode(towrite.read()).decode()
+    file_name += '.xlsx'
+    return f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download={file_name}>Download FMV.xlsx</a>'
+
+
+if uploaded_file is not None:
+    uploaded_file_name = uploaded_file.name
+    output_file_name = uploaded_file_name[0:uploaded_file_name.rfind('.')] + '_' + 'fmv'
+    with st.spinner(text='In progress...'):
+        uploaded_data = pd.read_csv(uploaded_file)
+        st.write(uploaded_data)
+        with st.sidebar:
+            data = execute(uploaded_data)
+        st.markdown(get_table_download_link_csv(data, output_file_name), unsafe_allow_html=True)
+        st.markdown(get_table_download_link_excel(data, output_file_name), unsafe_allow_html=True)

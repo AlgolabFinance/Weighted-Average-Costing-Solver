@@ -1,0 +1,9 @@
+,datetime,txType,debitAccount,debitAmount,debitAsset,creditAccount,creditAmount,creditAsset,txHash,histFMV,_id,processed,Capital G&L,dr,cr,check_dr,check_cr,seq_no,order_no
+0,2010,Buy,Binance,10,BTC,Bank Account,1000,USD,1,100,0,True,0,,,False,False,2010-1,1
+1,2011,Transfer,Coinbase,3,BTC,Binance,3,BTC,2,,1,True,0,2011CoinbaseBTC,2011BinanceBTC,False,False,2011-3,3
+2,2012,Buy,Coinbase,4,BTC,Bank Account,900,USD,3,225,3,True,0,,,False,False,2012-1,1
+3,2014,Transfer,Binance,1,BTC,Coinbase,1,BTC,4,,4,True,0,2014BinanceBTC,2014CoinbaseBTC,False,False,2014-3,3
+4,2015,Deposit,Binance,6,BTC,Airdrop Income,6,BTC,5,1200,6,True,0,,,False,False,2015-2,2
+7,2021,Trade,Binance,1000,ETH,Binance,12,BTC,6,120,7,True,113081.6326530612244897959184,2021BinanceETH,2021BinanceBTC,True,False,2021-3,3
+6,2021,Convert,Binance,1000,WETH,Binance,1000,ETH,6,,8,True,0,2021BinanceWETH,2021BinanceETH,True,True,2021-3,3
+5,2021,Trade,Wallet,10,BTC,Binance,1000,WETH,6,0,9,True,-120000,2021WalletBTC,2021BinanceWETH,False,True,2021-3,3

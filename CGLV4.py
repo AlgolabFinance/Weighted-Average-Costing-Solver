@@ -27,7 +27,7 @@ class CGL:
             previous_movement_index = target_account_records.index.tolist()[-1]
         return amount, value_per_unit, previous_movement_index
 
-    def update_balance_tracker(self, account, asset, amount_changed, value_changed, txHash, id, datetime, cgl=0):
+    def update_balance_tracker(self, account, asset, amount_changed, value_changed, txHash, id, datetime, cgl=0, proceeds=0):
         original_amount, original_value_per_unit, previous_movement_index = self.get_latest_balance(account, asset)
         new_balance = original_amount + amount_changed
 
@@ -53,6 +53,7 @@ class CGL:
         temp_dict['_id'] = id
         temp_dict['previous_movement'] = str(previous_movement_index)
         temp_dict['cgl'] = cgl
+        temp_dict['proceeds'] = proceeds
         temp_dict['datetime'] = datetime
         self.movement_tracker = pd.concat([self.movement_tracker, pd.DataFrame(temp_dict)], ignore_index=True)
 
@@ -150,7 +151,7 @@ class CGL:
         CGL = proceeds - cost
         # self.add_value_to_account(credit_account, credit_asset, -1*credit_amount, -1*cost)
         self.update_balance_tracker(credit_account, credit_asset, -1 * credit_amount, -1 * cost, tx_hash, id, datetime,
-                                    CGL)
+                                    CGL, proceeds)
         if tx_type == 'Trade':
             # self.add_value_to_account(debit_account, debit_asset, debit_amount, proceeds)
             self.update_balance_tracker(debit_account, debit_asset, debit_amount, proceeds, tx_hash, id, datetime)
@@ -236,21 +237,16 @@ class CGL:
             {'coin_location': [], 'asset': [], 'original_purchase_date': [], 'current_balance': [],
              'total_coin': [], 'basis_per_coin': [],
              'basis_balance': [], 'proceeds_per_coin': [], 'total_proceeds': [],
-             'cgl': []})
+             'cgl': [], 'proceeds': []})
         cgl_book = pd.read_csv(file_name)
-        cgl_book = cgl_book[cgl_book['Capital G&L'] != 0]
-        for i, row in cgl_book.iterrows():
-            temp_dict = dict()
-            temp_dict['coin_location'] = [row['creditAccount']]
-            temp_dict['asset'] = [row['creditAsset']]
-            temp_dict['original_purchase_date'] = []
-            temp_dict['current_balance'] = [[]]
-            temp_dict['total_coin'] = []
-            temp_dict['basis_per_coin'] = []
-            temp_dict['basis_balance'] = []
-            temp_dict['proceeds_per_coin'] = []
-            temp_dict['total_proceeds'] = []
-            temp_dict['cgl'] = []
+        cgl_book = cgl_book[cgl_book['cgl'] != 0]
+        cgl_book = cgl_book[['account', 'asset', 'current_balance', 'value_per_unit', 'current_value', 'cgl', 'proceeds', 'amount_changed']]
+        cgl_book['proceeds_per_coin'] = cgl_book['proceeds'] / cgl_book['amount_changed'].apply(abs)
+        cgl_book.set_index(['account', 'asset'], inplace=True)
+        cgl_book.sort_index(inplace=True)
+        cgl_book.reset_index(inplace=True)
+        cgl_book.to_csv('cgl_report.csv', index=False)
+        print(cgl_book)
 
 
 if __name__ == '__main__':
@@ -262,3 +258,4 @@ if __name__ == '__main__':
     # # print(cgl.data)
     cgl.write_to_file('result_v4.csv')
     cgl.generate_transactions_report()
+    cgl.generate_cgl_report('movement_tracker.csv')
