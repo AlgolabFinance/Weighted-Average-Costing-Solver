@@ -1,11 +1,12 @@
-import collections
+import base64
+import io
 
 import numpy as np
 import pandas as pd
 from decimal import Decimal
 import datetime as dt
 import time
-from pandas.api.types import CategoricalDtype
+import streamlit as st
 
 
 class CGL:
@@ -28,8 +29,8 @@ class CGL:
             previous_movement_index = target_account_records.index.tolist()[-1]
         return amount, value_per_unit, previous_movement_index
 
-    def update_balance_tracker(self, account, asset, amount_changed, value_changed, txHash,
-                               id, datetime, cgl=0, proceeds=0):
+    def update_movement_tracker(self, account, asset, amount_changed, value_changed, txHash,
+                                id, datetime, cgl=0, proceeds=0):
         original_amount, original_value_per_unit, previous_movement_index = self.get_latest_balance(account, asset)
         new_balance = original_amount + amount_changed
 
@@ -58,14 +59,6 @@ class CGL:
         temp_dict['proceeds'] = proceeds
         temp_dict['datetime'] = datetime
         self.movement_tracker = pd.concat([self.movement_tracker, pd.DataFrame(temp_dict)], ignore_index=True)
-
-    # def find_opposite_deposit_account(self, txHash, amount, asset_type):
-    #     data = self.data
-    #     indexes = data[(data['txHash'] == txHash) & (data['debitAmount'] == amount) & (data['debitAsset'] == asset_type)].index.tolist()
-    #     if len(indexes) != 1:
-    #         raise Exception("Expected 1 corresponding deposit transaction but got " + str(len(indexes)))
-    #     target_index = indexes[0]
-    #     return target_index
 
     def read_data(self, file_name):
         self.data = pd.read_csv(file_name, dtype=str)
@@ -122,8 +115,6 @@ class CGL:
         self.data.sort_values('check_cr', inplace=True, ascending=True)
         self.data.sort_values('check_dr', inplace=True, ascending=False)
         self.data.sort_values('seq_no', inplace=True)
-        # print(pivot)
-        # print(self.data)
 
     def calculate_CGL(self, record):
         tx_type = record.txType
@@ -151,12 +142,10 @@ class CGL:
         #                     + str(balance_amount) + '  Credit Amount: ' + str(credit_amount))
         cost = credit_amount * value_per_unit
         CGL = proceeds - cost
-        # self.add_value_to_account(credit_account, credit_asset, -1*credit_amount, -1*cost)
-        self.update_balance_tracker(credit_account, credit_asset, -1 * credit_amount, -1 * cost, tx_hash, id, datetime,
-                                    CGL, proceeds)
+        self.update_movement_tracker(credit_account, credit_asset, -1 * credit_amount, -1 * cost, tx_hash, id, datetime,
+                                     CGL, proceeds)
         if tx_type == 'Trade':
-            # self.add_value_to_account(debit_account, debit_asset, debit_amount, proceeds)
-            self.update_balance_tracker(debit_account, debit_asset, debit_amount, proceeds, tx_hash, id, datetime)
+            self.update_movement_tracker(debit_account, debit_asset, debit_amount, proceeds, tx_hash, id, datetime)
         return CGL
 
     def execute_calculation(self):
@@ -179,33 +168,33 @@ class CGL:
                 self.data.loc[index, 'Capital G&L'] = cgl
             elif tx_type == 'Withdrawal':
                 balance, value_per_unit, _ = self.get_latest_balance(credit_account, credit_asset)
-                self.update_balance_tracker(credit_account, credit_asset, -1 * credit_amount,
-                                            -1 * value_per_unit * credit_amount, tx_hash, id, datetime)
+                self.update_movement_tracker(credit_account, credit_asset, -1 * credit_amount,
+                                             -1 * value_per_unit * credit_amount, tx_hash, id, datetime)
 
             elif tx_type == 'Deposit':
-                self.update_balance_tracker(debit_account, debit_asset, debit_amount, debit_amount * FMV
-                                            , tx_hash, id, datetime)
+                self.update_movement_tracker(debit_account, debit_asset, debit_amount, debit_amount * FMV
+                                             , tx_hash, id, datetime)
 
             elif tx_type == 'Buy':
-                self.update_balance_tracker(debit_account, debit_asset, debit_amount, credit_amount
-                                            , tx_hash, id, datetime)
+                self.update_movement_tracker(debit_account, debit_asset, debit_amount, credit_amount
+                                             , tx_hash, id, datetime)
             elif tx_type == 'Convert':
                 balance, value_per_unit, _ = self.get_latest_balance(credit_account, credit_asset)
                 # if balance < credit_amount:
                 #     raise Exception("Negative Balance for account: " + str(debit_asset) + ". Current balance: "
                 #                     + str(balance) + '  Credit Amount: ' + str(credit_amount))
 
-                self.update_balance_tracker(credit_account, credit_asset, -1 * credit_amount,
-                                            -1 * value_per_unit * credit_amount, tx_hash, id, datetime)
-                self.update_balance_tracker(debit_account, debit_asset, debit_amount, value_per_unit * credit_amount,
-                                            tx_hash, id, datetime)
+                self.update_movement_tracker(credit_account, credit_asset, -1 * credit_amount,
+                                             -1 * value_per_unit * credit_amount, tx_hash, id, datetime)
+                self.update_movement_tracker(debit_account, debit_asset, debit_amount, value_per_unit * credit_amount,
+                                             tx_hash, id, datetime)
             elif tx_type == 'Transfer':
                 _, credit_value_per_unit, _ = self.get_latest_balance(credit_account, credit_asset)
                 _, debit_value_per_unit, _ = self.get_latest_balance(debit_account, debit_asset)
-                self.update_balance_tracker(credit_account, credit_asset, -1 * credit_amount,
-                                            -1 * credit_value_per_unit * credit_amount, tx_hash, id, datetime)
-                self.update_balance_tracker(debit_account, debit_asset, credit_amount,
-                                            credit_value_per_unit * credit_amount, tx_hash, id, datetime)
+                self.update_movement_tracker(credit_account, credit_asset, -1 * credit_amount,
+                                             -1 * credit_value_per_unit * credit_amount, tx_hash, id, datetime)
+                self.update_movement_tracker(debit_account, debit_asset, credit_amount,
+                                             credit_value_per_unit * credit_amount, tx_hash, id, datetime)
             self.data.loc[index, 'processed'] = True
 
     def write_to_file(self, file_name):
@@ -213,35 +202,24 @@ class CGL:
         self.movement_tracker.to_csv('movement_tracker.csv')
 
     def generate_transactions_report(self):
-        # tx_report = pd.DataFrame(
-        #     {'Account': [], 'Asset': [], 'Datetime': [], 'Current Balance': [],
-        #      'Average Value': [], 'Total Value': [],
-        #      'Balance Before Change': [], 'Total Value Before Change': [], 'Balance Changed': [],
-        #      'Value Changed': []})
-        # tracker_book = pd.read_csv('movement_tracker.csv')
-        tx_report = pd.read_csv('movement_tracker.csv')
+        tx_report = self.movement_tracker
         tx_report = tx_report[['account', 'asset', 'datetime', 'current_balance', 'value_per_unit',
-                                      'current_value', 'previous_balance', 'amount_changed', 'value_changed',
+                               'current_value', 'previous_balance', 'amount_changed', 'value_changed',
                                'previous_value']]
         tx_report['Total Value Before Change'] = tx_report['previous_value'] * tx_report['previous_balance']
         tx_report.drop('previous_value', axis=1, inplace=True)
         tx_report.rename(columns={'account': 'Account', 'asset': 'Asset', 'datetime': 'Datetime',
                                   'current_balance': 'Current Balance', 'value_per_unit': 'Average Value',
-                                      'current_value': 'Total Value', 'previous_balance':'Balance Before Change'
-                                    , 'amount_changed': 'Balance Changed', 'value_changed': 'Value Changed',}, inplace=True)
+                                  'current_value': 'Total Value', 'previous_balance': 'Balance Before Change'
+            , 'amount_changed': 'Balance Changed', 'value_changed': 'Value Changed', }, inplace=True)
         tx_report.set_index(['Account', 'Asset', 'Datetime'], inplace=True)
         tx_report.sort_index(inplace=True)
         tx_report.reset_index(inplace=True)
-        tx_report.to_csv("tx_report.csv", index=False)
+        # tx_report.to_csv("tx_report.csv", index=False)
+        return tx_report
 
-    def generate_cgl_report(self, file_name):
-        # cgl_report = pd.DataFrame(
-        #     {'coin_location': [], 'asset': [], 'original_purchase_date': [], 'current_balance': [],
-        #      'total_coin': [], 'basis_per_coin': [],
-        #      'basis_balance': [], 'proceeds_per_coin': [], 'total_proceeds': [],
-        #      'cgl': [], 'proceeds': []})
-        cgl_book = pd.read_csv(file_name)
-        cgl_report = cgl_book[cgl_book['cgl'] != 0]
+    def generate_cgl_report(self, movement_tracker_df):
+        cgl_report = movement_tracker_df[movement_tracker_df['cgl'] != 0]
         cgl_report = cgl_report[['account', 'asset', 'datetime', 'previous_value', 'value_changed',
                                  'cgl', 'proceeds', 'amount_changed', '_id', 'txHash']]
         cgl_report['amount_changed'] = cgl_report['amount_changed'].apply(abs)
@@ -251,29 +229,81 @@ class CGL:
         for i, row in cgl_report.iterrows():
             account = row.account
             asset = row.asset
-            cgl_report.loc[i, 'purchase_date'] = cgl_book[(cgl_book['account'] == account) & (cgl_book['asset'] == asset)
-                                                          & (cgl_book['previous_balance'] == 0)]['datetime'].to_list()[-1]
+            cgl_report.loc[i, 'purchase_date'] = \
+            movement_tracker_df[(movement_tracker_df['account'] == account) & (movement_tracker_df['asset'] == asset)
+                                & (movement_tracker_df['previous_balance'] == 0)]['datetime'].to_list()[-1]
         cgl_report.set_index(['account', 'asset'], inplace=True)
         cgl_report.sort_index(inplace=True)
         cgl_report.reset_index(inplace=True)
-        cgl_report.rename(columns={'account': 'COIN LOCATION', 'asset':'ASSET','datetime': 'DATETIME',
+        cgl_report.rename(columns={'account': 'COIN LOCATION', 'asset': 'ASSET', 'datetime': 'DATETIME',
                                    'purchase_date': 'ORIGINAL PURCHASE DATE', "amount_changed": "AMOUNT",
                                    'previous_value': 'BASIS PER COIN', 'proceeds': 'PROCEEDS', 'value_changed': 'BASIS',
-                                   'proceeds_per_coin':'PROCEEDS PER COIN', 'cgl':'CAPITAL GAIN(LOSS)'}
+                                   'proceeds_per_coin': 'PROCEEDS PER COIN', 'cgl': 'CAPITAL GAIN(LOSS)'}
                           , inplace=True)
         cgl_report.to_csv('cgl_report.csv', index=False)
         print(cgl_report)
+        return cgl_report
+
+
+def get_table_download_link_csv(df, file_name='output', description=''):
+    """Generates a link allowing the data in a given panda dataframe to be downloaded
+    in:  dataframe
+    out: href string
+    """
+    csv = df.to_csv(index=False)
+    b64 = base64.b64encode(csv.encode()).decode()  # some strings <-> bytes conversions necessary here
+    file_name += '.csv'
+    return f'<a href="data:file/csv;base64,{b64}" download={file_name}>Download {description} CSV</a>'
+
+
+def get_table_download_link_excel(df, file_name='output', description=''):
+    """Generates a link allowing the data in a given panda dataframe to be downloaded
+    in:  dataframe
+    out: href string
+    """
+    towrite = io.BytesIO()
+    file_excel = df.to_excel(towrite, encoding='utf-8', index=False, header=True)
+    towrite.seek(0)  # reset pointer
+    b64 = base64.b64encode(towrite.read()).decode()
+    file_name += '.xlsx'
+    return f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download={file_name}>Download {description} XLSX</a>'
 
 
 if __name__ == '__main__':
-    start_time = time.perf_counter()
+    file_type = 'csv'
     pd.set_option('display.max_columns', None)
-    cgl = CGL()
-    cgl.read_data('test_v4.csv')
-    cgl.execute_calculation()
-    # print(cgl.movement_tracker)
-    # print(cgl.data)
-    cgl.write_to_file('result_v4.csv')
-    cgl.generate_transactions_report()
-    cgl.generate_cgl_report('movement_tracker.csv')
-    print(time.perf_counter() - start_time)
+    uploaded_file = st.file_uploader("Please upload {0} file".format(file_type), type=['csv'], key='uploader')
+    if uploaded_file is not None:
+        uploaded_file_name = uploaded_file.name
+        output_file_prefix = uploaded_file_name[0:uploaded_file_name.rfind('.')] + '_'
+        cgl = CGL()
+        with st.spinner(text='In progress...'):
+            cgl.read_data(uploaded_file)
+            st.header('Preprocessed Uploaded Data')
+            st.write(cgl.data.astype(str))
+            cgl.execute_calculation()
+            tx_report = cgl.generate_transactions_report()
+            st.header('Movement Tracker')
+            st.write(cgl.movement_tracker.astype('str'))
+            st.header('Transaction Report')
+            tx_report = tx_report.astype('str')
+            st.write(tx_report)
+            cgl_report = cgl.generate_cgl_report(movement_tracker_df=cgl.movement_tracker)
+            cgl_report = cgl_report.astype(str)
+            st.header('Capital Gain & Loss Report')
+            st.write(cgl_report)
+            cgl.data = cgl.data.astype('str')
+            cgl.movement_tracker = cgl.movement_tracker.astype('str')
+        with st.sidebar:
+            st.markdown(get_table_download_link_csv(cgl.data, output_file_prefix + 'processed_data', 'Processed Data'),
+                        unsafe_allow_html=True)
+            st.markdown(get_table_download_link_excel(cgl.data, output_file_prefix + 'movement_tracker', 'Movement Tracker'),
+                        unsafe_allow_html=True)
+            st.markdown(
+                get_table_download_link_excel(tx_report, output_file_prefix + 'tx_report', 'Transaction Report'),
+                unsafe_allow_html=True)
+            st.markdown(get_table_download_link_excel(cgl_report, output_file_prefix + 'cgl_report', 'CGL Report'),
+                        unsafe_allow_html=True)
+
+            # st.markdown(get_table_download_link_csv(data, output_file_name), unsafe_allow_html=True)
+            # st.markdown(get_table_download_link_excel(data, output_file_name), unsafe_allow_html=True)
