@@ -245,7 +245,7 @@ class CGL:
                 else:
                     value_changed = credit_value_per_unit * credit_amount
                 self.update_movement_tracker(credit_account, credit_asset, -1 * credit_amount,
-                                             -1 * value_changed * credit_amount, tx_hash, id, datetime)
+                                             -1 * value_changed, tx_hash, id, datetime)
                 self.update_movement_tracker(debit_account, debit_asset, credit_amount,
                                              value_changed, tx_hash, id, datetime)
             self.data.loc[index, 'processed'] = True
@@ -353,7 +353,7 @@ if __name__ == '__main__':
         with st.sidebar:
             st.markdown(get_table_download_link_csv(cgl.data, output_file_prefix + 'processed_data', 'Processed Data'),
                         unsafe_allow_html=True)
-            st.markdown(get_table_download_link_excel(cgl.data, output_file_prefix + 'movement_tracker', 'Movement Tracker'),
+            st.markdown(get_table_download_link_excel(cgl.movement_tracker, output_file_prefix + 'movement_tracker', 'Movement Tracker'),
                         unsafe_allow_html=True)
             st.markdown(
                 get_table_download_link_excel(tx_report, output_file_prefix + 'tx_report', 'Transaction Report'),

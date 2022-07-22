@@ -246,7 +246,7 @@ class CGL:
                 value_changed = 0
                 if credit_balance < credit_amount:
                     value_changed = credit_value_per_unit * credit_balance + (
-                                credit_amount - credit_balance) * Decimal(credit_asset_fmv)
+                                credit_amount - credit_balance) * credit_asset_fmv
                     # self.update_balance_tracker(credit_account, credit_asset, -1 * credit_amount,
                     #                             -1 * value_changed, tx_hash, id, datetime)
                     # self.update_balance_tracker(debit_account, debit_asset, credit_amount,
@@ -254,7 +254,7 @@ class CGL:
                 else:
                     value_changed = credit_value_per_unit * credit_amount
                 self.update_movement_tracker(credit_account, credit_asset, -1 * credit_amount,
-                                             -1 * value_changed * credit_amount, tx_hash, id, datetime)
+                                             -1 * value_changed, tx_hash, id, datetime)
                 self.update_movement_tracker(debit_account, debit_asset, credit_amount,
                                              value_changed, tx_hash, id, datetime)
             self.data.loc[index, 'processed'] = True
