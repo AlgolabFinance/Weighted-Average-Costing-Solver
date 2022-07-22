@@ -88,7 +88,7 @@ def execute(file_name, maximum_attempt=5):
     data['debitAssetId'] = data['datetime'] + '-' + data['debitAsset']
     data['creditAssetId'] = data['datetime'] + '-' + data['creditAsset']
     data['txFeeAssetId'] = data['datetime'] + '-' + data['txFeeAsset']
-    lookup = data[data['txType'] != 'Convert']
+    lookup = data
     lookup = pd.DataFrame([lookup['datetime'].to_list() * 3, lookup['debitAsset'].to_list() +
                            lookup['creditAsset'].to_list()
                            + lookup['txFeeAsset'].to_list()]).T.dropna().drop_duplicates()
@@ -125,13 +125,15 @@ def execute(file_name, maximum_attempt=5):
     data = pd.merge(data, lookup[['fmv_id', 'fmv']], how='left', left_on='txFeeAssetId', right_on='fmv_id')
     data.rename(columns={'fmv': 'txFeeAssetFMV'}, inplace=True)
     data.drop(columns=['fmv_id', 'creditAssetId', 'debitAssetId', 'txFeeAssetId'], inplace=True, axis=1)
-    data.to_csv('FMV_output.csv')
     print('Time to merge data: ' + str(time.perf_counter() - start_time))
+    return data
+
 
 # 27917 records in total, 27341 records to look up FMV after removing duplication
 # Done in 685 seconds
 # 14 failed in the end
 if __name__ == '__main__':
     semaphore = asyncio.Semaphore(2000)
-    file_name = 'Bulk Upload v2.csv'
-    execute(file_name, 8)
+    file_name = 'test_v4.csv'
+    data = execute(file_name, 8)
+    data.to_csv('test_v4.csv')

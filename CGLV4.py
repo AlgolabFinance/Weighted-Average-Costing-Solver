@@ -28,8 +28,8 @@ class CGL:
             previous_movement_index = target_account_records.index.tolist()[-1]
         return amount, value_per_unit, previous_movement_index
 
-    def update_balance_tracker(self, account, asset, amount_changed, value_changed, txHash,
-                               id, datetime, cgl=0, proceeds=0):
+    def update_movement_tracker(self, account, asset, amount_changed, value_changed, txHash,
+                                id, datetime, cgl=0, proceeds=0):
         original_amount, original_value_per_unit, previous_movement_index = self.get_latest_balance(account, asset)
         new_balance = original_amount + amount_changed
 
@@ -69,9 +69,14 @@ class CGL:
 
     def read_data(self, file_name):
         self.data = pd.read_csv(file_name, dtype=str)
+        # only keep pre8949 records
+        self.data = self.data[(self.data['debitAccount'] != 'Transfer') & (self.data['creditAccount'] != 'Transfer')]
         self.data['creditAmount'] = self.data['creditAmount'].apply(Decimal)
         self.data['debitAmount'] = self.data['debitAmount'].apply(Decimal)
         self.data['histFMV'] = self.data['histFMV'].apply(Decimal)
+        self.data['creditAssetFMV'] = self.data['creditAssetFMV'].apply(Decimal)
+        self.data['debitAssetFMV'] = self.data['debitAssetFMV'].apply(Decimal)
+        self.data['txFeeAssetFMV'] = self.data['txFeeAssetFMV'].apply(Decimal)
         self.data['processed'] = False
         self.data['Capital G&L'] = 0
         # cat_txType = CategoricalDtype(
@@ -96,12 +101,12 @@ class CGL:
         temp_df2.columns = ['pair']
         pivot = pd.concat([temp_df1, temp_df2], ignore_index=True)
         pivot.dropna(inplace=True)
-        pivot = pd.DataFrame({'pair': pivot, 'cr': 0, 'dr': 0, 'check': False}).drop_duplicates()
+        pivot = pd.DataFrame({'pair': pivot, 'cr': 0, 'dr': 0, 'check': 0}).drop_duplicates()
         pivot.reset_index(inplace=True)
         for i, row in pivot.iterrows():
             pivot.loc[i, 'cr'] = self.data[self.data['cr'] == pivot.loc[i, 'pair']].count()['cr']
             pivot.loc[i, 'dr'] = self.data[self.data.dr == pivot.loc[i, 'pair']].count()['dr']
-        pivot.loc[(pivot.dr > 0) & (pivot.cr > 0), 'check'] = True
+        pivot.loc[(pivot.dr > 0) & (pivot.cr > 0), 'check'] = 1
         self.data = pd.merge(self.data, pivot[['pair', 'check']], how='left', left_on='dr',
                              right_on='pair').drop_duplicates()
         self.data.rename(columns={'check': 'check_dr'}, inplace=True)
@@ -109,8 +114,8 @@ class CGL:
                              right_on='pair').drop_duplicates()
         self.data.rename(columns={'check': 'check_cr'}, inplace=True)
         self.data.drop(['pair_x', 'pair_y'], axis=1, inplace=True)
-        self.data.loc[:, 'check_dr'].fillna(False, inplace=True)
-        self.data.loc[:, 'check_cr'].fillna(False, inplace=True)
+        self.data.loc[:, 'check_dr'].fillna(0, inplace=True)
+        self.data.loc[:, 'check_cr'].fillna(0, inplace=True)
         self.data['seq_no'] = ''
         self.data['order_no'] = ''
         self.data.loc[self.data['txType'] == 'Buy', 'order_no'] = '1'
@@ -119,9 +124,28 @@ class CGL:
         self.data.loc[self.data['txType'] == 'Withdrawal', 'order_no'] = '4'
         self.data.loc[self.data['txType'] == 'Sell', 'order_no'] = '5'
         self.data.loc[:, 'seq_no'] = self.data.datetime + '-' + self.data.order_no
-        self.data.sort_values('check_cr', inplace=True, ascending=True)
+        self.data[['check_cr', 'check_dr']] = self.data[['check_cr', 'check_dr']].astype(int)
+        self.data['check_count'] = self.data['check_cr'] + self.data['check_dr']
+        check_set = self.data[self.data['check_count'] == 2]
+        temp_df3 = check_set['cr']
+        temp_df4 = check_set['dr']
+        temp_df3.columns = ['pair']
+        temp_df4.columns = ['pair']
+        pivot_check = pd.concat([temp_df3, temp_df4], ignore_index=True)
+        pivot_check.dropna(inplace=True)
+        pivot_check = pd.DataFrame({'pair': pivot_check, 'cr': 0, 'dr': 0, 'check': 0}).drop_duplicates()
+        for i, row in pivot_check.iterrows():
+            pivot_check.loc[i, 'cr'] = check_set[check_set['cr'] == pivot_check.loc[i, 'pair']].count()['cr']
+            pivot_check.loc[i, 'dr'] = check_set[check_set['dr'] == pivot_check.loc[i, 'pair']].count()['dr']
+        pivot_check.loc[(pivot_check.cr > 0) & (pivot_check.dr > 0), 'check'] = 1
+        # print(pivot_check)
+        self.data = pd.merge(self.data, pivot_check[['pair', 'check']], how='left', left_on='dr',
+                             right_on='pair').drop_duplicates()
+        self.data.loc[self.data.check == 1, 'check_dr'] = 2
         self.data.sort_values('check_dr', inplace=True, ascending=False)
+        self.data.sort_values('check_cr', inplace=True, ascending=True)
         self.data.sort_values('seq_no', inplace=True)
+        self.data.drop('pair', inplace=True, axis=1)
         # print(pivot)
         # print(self.data)
 
@@ -136,6 +160,7 @@ class CGL:
         debit_account = record.debitAccount
         debit_amount = record.debitAmount
         debit_asset = record.debitAsset
+        credit_asset_fmv = record.creditAssetFMV
         tx_hash = record.txHash
         id = record._id
         datetime = record.datetime
@@ -149,14 +174,17 @@ class CGL:
         # if credit_amount > balance_amount:
         #     raise Exception(id + " :Negative Balance for account: " + str(credit_asset) + ". Current balance: "
         #                     + str(balance_amount) + '  Credit Amount: ' + str(credit_amount))
-        cost = credit_amount * value_per_unit
+        if credit_amount > balance_amount:
+            cost = balance_amount * value_per_unit + (credit_amount - balance_amount) * credit_asset_fmv
+        else:
+            cost = credit_amount * value_per_unit
         CGL = proceeds - cost
         # self.add_value_to_account(credit_account, credit_asset, -1*credit_amount, -1*cost)
-        self.update_balance_tracker(credit_account, credit_asset, -1 * credit_amount, -1 * cost, tx_hash, id, datetime,
-                                    CGL, proceeds)
+        self.update_movement_tracker(credit_account, credit_asset, -1 * credit_amount, -1 * cost, tx_hash, id, datetime,
+                                     CGL, proceeds)
         if tx_type == 'Trade':
             # self.add_value_to_account(debit_account, debit_asset, debit_amount, proceeds)
-            self.update_balance_tracker(debit_account, debit_asset, debit_amount, proceeds, tx_hash, id, datetime)
+            self.update_movement_tracker(debit_account, debit_asset, debit_amount, proceeds, tx_hash, id, datetime)
         return CGL
 
     def execute_calculation(self):
@@ -169,6 +197,7 @@ class CGL:
             debit_account = record.debitAccount
             debit_amount = record.debitAmount
             debit_asset = record.debitAsset
+            credit_asset_fmv = record.creditAssetFMV
             FMV = record.histFMV
             id = record._id
             datetime = record.datetime
@@ -179,33 +208,55 @@ class CGL:
                 self.data.loc[index, 'Capital G&L'] = cgl
             elif tx_type == 'Withdrawal':
                 balance, value_per_unit, _ = self.get_latest_balance(credit_account, credit_asset)
-                self.update_balance_tracker(credit_account, credit_asset, -1 * credit_amount,
-                                            -1 * value_per_unit * credit_amount, tx_hash, id, datetime)
+                value_changed = 0
+                if balance < credit_amount:
+                    value_changed = -1 * (value_per_unit * balance + (credit_amount - balance) * credit_asset_fmv)
+                else:
+                    value_changed = -1 * value_per_unit * credit_amount
+                self.update_movement_tracker(credit_account, credit_asset, -1 * credit_amount,
+                                             value_changed, tx_hash, id, datetime)
 
             elif tx_type == 'Deposit':
-                self.update_balance_tracker(debit_account, debit_asset, debit_amount, debit_amount * FMV
-                                            , tx_hash, id, datetime)
+                self.update_movement_tracker(debit_account, debit_asset, debit_amount, debit_amount * FMV
+                                             , tx_hash, id, datetime)
 
             elif tx_type == 'Buy':
-                self.update_balance_tracker(debit_account, debit_asset, debit_amount, credit_amount
-                                            , tx_hash, id, datetime)
+                self.update_movement_tracker(debit_account, debit_asset, debit_amount, credit_amount
+                                             , tx_hash, id, datetime)
             elif tx_type == 'Convert':
                 balance, value_per_unit, _ = self.get_latest_balance(credit_account, credit_asset)
                 # if balance < credit_amount:
                 #     raise Exception("Negative Balance for account: " + str(debit_asset) + ". Current balance: "
                 #                     + str(balance) + '  Credit Amount: ' + str(credit_amount))
-
-                self.update_balance_tracker(credit_account, credit_asset, -1 * credit_amount,
-                                            -1 * value_per_unit * credit_amount, tx_hash, id, datetime)
-                self.update_balance_tracker(debit_account, debit_asset, debit_amount, value_per_unit * credit_amount,
-                                            tx_hash, id, datetime)
+                if balance < credit_amount:
+                    value_changed = value_per_unit * balance + (credit_amount - balance) * credit_asset_fmv
+                    self.update_movement_tracker(credit_account, credit_asset, -1 * credit_amount,
+                                                 -1 * value_changed, tx_hash, id, datetime)
+                    self.update_movement_tracker(debit_account, debit_asset, debit_amount, value_changed,
+                                                 tx_hash, id, datetime)
+                else:
+                    self.update_movement_tracker(credit_account, credit_asset, -1 * credit_amount,
+                                                 -1 * value_per_unit * credit_amount, tx_hash, id, datetime)
+                    self.update_movement_tracker(debit_account, debit_asset, debit_amount,
+                                                 value_per_unit * credit_amount,
+                                                 tx_hash, id, datetime)
             elif tx_type == 'Transfer':
-                _, credit_value_per_unit, _ = self.get_latest_balance(credit_account, credit_asset)
+                credit_balance, credit_value_per_unit, _ = self.get_latest_balance(credit_account, credit_asset)
                 _, debit_value_per_unit, _ = self.get_latest_balance(debit_account, debit_asset)
-                self.update_balance_tracker(credit_account, credit_asset, -1 * credit_amount,
-                                            -1 * credit_value_per_unit * credit_amount, tx_hash, id, datetime)
-                self.update_balance_tracker(debit_account, debit_asset, credit_amount,
-                                            credit_value_per_unit * credit_amount, tx_hash, id, datetime)
+                value_changed = 0
+                if credit_balance < credit_amount:
+                    value_changed = credit_value_per_unit * credit_balance + (
+                                credit_amount - credit_balance) * Decimal(credit_asset_fmv)
+                    # self.update_balance_tracker(credit_account, credit_asset, -1 * credit_amount,
+                    #                             -1 * value_changed, tx_hash, id, datetime)
+                    # self.update_balance_tracker(debit_account, debit_asset, credit_amount,
+                    #                             value_changed, tx_hash, id, datetime)
+                else:
+                    value_changed = credit_value_per_unit * credit_amount
+                self.update_movement_tracker(credit_account, credit_asset, -1 * credit_amount,
+                                             -1 * value_changed * credit_amount, tx_hash, id, datetime)
+                self.update_movement_tracker(debit_account, debit_asset, credit_amount,
+                                             value_changed, tx_hash, id, datetime)
             self.data.loc[index, 'processed'] = True
 
     def write_to_file(self, file_name):
@@ -221,14 +272,14 @@ class CGL:
         # tracker_book = pd.read_csv('movement_tracker.csv')
         tx_report = pd.read_csv('movement_tracker.csv')
         tx_report = tx_report[['account', 'asset', 'datetime', 'current_balance', 'value_per_unit',
-                                      'current_value', 'previous_balance', 'amount_changed', 'value_changed',
+                               'current_value', 'previous_balance', 'amount_changed', 'value_changed',
                                'previous_value']]
         tx_report['Total Value Before Change'] = tx_report['previous_value'] * tx_report['previous_balance']
         tx_report.drop('previous_value', axis=1, inplace=True)
         tx_report.rename(columns={'account': 'Account', 'asset': 'Asset', 'datetime': 'Datetime',
                                   'current_balance': 'Current Balance', 'value_per_unit': 'Average Value',
-                                      'current_value': 'Total Value', 'previous_balance':'Balance Before Change'
-                                    , 'amount_changed': 'Balance Changed', 'value_changed': 'Value Changed',}, inplace=True)
+                                  'current_value': 'Total Value', 'previous_balance': 'Balance Before Change'
+            , 'amount_changed': 'Balance Changed', 'value_changed': 'Value Changed', }, inplace=True)
         tx_report.set_index(['Account', 'Asset', 'Datetime'], inplace=True)
         tx_report.sort_index(inplace=True)
         tx_report.reset_index(inplace=True)
@@ -251,29 +302,36 @@ class CGL:
         for i, row in cgl_report.iterrows():
             account = row.account
             asset = row.asset
-            cgl_report.loc[i, 'purchase_date'] = cgl_book[(cgl_book['account'] == account) & (cgl_book['asset'] == asset)
-                                                          & (cgl_book['previous_balance'] == 0)]['datetime'].to_list()[-1]
+            cgl_report.loc[i, 'purchase_date'] = \
+            cgl_book[(cgl_book['account'] == account) & (cgl_book['asset'] == asset)
+                     & (cgl_book['previous_balance'] == 0)]['datetime'].to_list()[-1]
         cgl_report.set_index(['account', 'asset'], inplace=True)
         cgl_report.sort_index(inplace=True)
         cgl_report.reset_index(inplace=True)
-        cgl_report.rename(columns={'account': 'COIN LOCATION', 'asset':'ASSET','datetime': 'DATETIME',
+        cgl_report.rename(columns={'account': 'COIN LOCATION', 'asset': 'ASSET', 'datetime': 'DATETIME',
                                    'purchase_date': 'ORIGINAL PURCHASE DATE', "amount_changed": "AMOUNT",
                                    'previous_value': 'BASIS PER COIN', 'proceeds': 'PROCEEDS', 'value_changed': 'BASIS',
-                                   'proceeds_per_coin':'PROCEEDS PER COIN', 'cgl':'CAPITAL GAIN(LOSS)'}
+                                   'proceeds_per_coin': 'PROCEEDS PER COIN', 'cgl': 'CAPITAL GAIN(LOSS)'}
                           , inplace=True)
+
+        cgl_report = cgl_report[
+            ['COIN LOCATION', 'ASSET', 'DATETIME', 'ORIGINAL PURCHASE DATE', 'AMOUNT', 'BASIS PER COIN',
+             'BASIS', 'PROCEEDS', 'PROCEEDS PER COIN', 'CAPITAL GAIN(LOSS)']]
         cgl_report.to_csv('cgl_report.csv', index=False)
-        print(cgl_report)
 
 
 if __name__ == '__main__':
     start_time = time.perf_counter()
     pd.set_option('display.max_columns', None)
     cgl = CGL()
-    cgl.read_data('test_v4.csv')
+    cgl.read_data('pre8949_fmv.csv')
+    # cgl.read_data('test_abnormal.csv')
+    # cgl.read_data('test_v4.csv')
+    # cgl.read_data('test_neg.csv')
     cgl.execute_calculation()
     # print(cgl.movement_tracker)
     # print(cgl.data)
     cgl.write_to_file('result_v4.csv')
     cgl.generate_transactions_report()
     cgl.generate_cgl_report('movement_tracker.csv')
-    print(time.perf_counter() - start_time)
+    # print(time.perf_counter() - start_time)
