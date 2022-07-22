@@ -12,14 +12,6 @@ import aiohttp
 import streamlit as st
 # from histFMVV4 import *
 
-file_type = 'csv'
-# loop = asyncio.new_event_loop()
-# asyncio.set_event_loop(loop)
-incomplete_set = contextvars.ContextVar('incomplete_set')
-semaphore = contextvars.ContextVar('semaphore')
-task_list = contextvars.ContextVar('task_list')
-# semaphore = asyncio.Semaphore(2000)
-uploaded_file = st.file_uploader("Please upload {0} file".format(file_type), type=['csv'], key='uploader')
 
 async def lookupFMV_Kaiko(date, token_symbol, before, after):
     date = str(date)[0:19] + "Z"
@@ -38,7 +30,7 @@ async def lookupFMV_Kaiko(date, token_symbol, before, after):
     global semaphore
     async with semaphore.get():
         async with aiohttp.ClientSession(headers=headers) as session:
-            async with session.get(tx_url.format(str(token_symbol).lower()), headers=headers, params=params) as response:
+            with session.get(tx_url.format(str(token_symbol).lower()), headers=headers, params=params) as response:
                 text = await response.text()
                 if response.status != 200:
                     if response.status == 400:
@@ -62,7 +54,7 @@ async def lookupFMV_Kaiko(date, token_symbol, before, after):
                 return price, delta
 
 
-async def main(task_list):
+async def gather(task_list):
     await asyncio.gather(*task_list)
 
 
@@ -112,13 +104,13 @@ def execute(data, maximum_attempt=5):
     # loop = asyncio.get_running_loop()
     task_list.set([get_fmv(lookup, i, window=default_window) for i in range(start, end)])
     # loop.run_until_complete(main(task_list))
-    asyncio.run(main(task_list.get()))
+    asyncio.run(gather(task_list.get()))
     err_window = 4
     #st.header('Redoing the failed requests...')
     while len(incomplete_set.get()) > 0 and attempts < maximum_attempt:
         task_list.set([get_fmv(lookup, i, window=err_window) for i in incomplete_set.get()])
         # loop.run_until_complete(main(task_list))
-        asyncio.run(main(task_list.get()))
+        asyncio.run(gather(task_list.get()))
         attempts += 1
         err_window = min(16, err_window * 2)
     #st.header('Download finished')
@@ -168,14 +160,27 @@ def get_table_download_link_excel(df, file_name = 'output'):
     file_name += '.xlsx'
     return f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download={file_name}>Download FMV.xlsx</a>'
 
+def main():
+    file_type = 'csv'
+    # loop = asyncio.new_event_loop()
+    # asyncio.set_event_loop(loop)
+    incomplete_set = contextvars.ContextVar('incomplete_set')
+    semaphore = contextvars.ContextVar('semaphore')
+    task_list = contextvars.ContextVar('task_list')
+    # semaphore = asyncio.Semaphore(2000)
+    uploaded_file = st.file_uploader("Please upload {0} file".format(file_type), type=['csv'], key='uploader')
 
-if uploaded_file is not None:
-    uploaded_file_name = uploaded_file.name
-    output_file_name = uploaded_file_name[0:uploaded_file_name.rfind('.')] + '_' + 'fmv'
-    with st.spinner(text='In progress...'):
-        uploaded_data = pd.read_csv(uploaded_file)
-        st.write(uploaded_data)
-        with st.sidebar:
-            data = execute(uploaded_data)
-        st.markdown(get_table_download_link_csv(data, output_file_name), unsafe_allow_html=True)
-        st.markdown(get_table_download_link_excel(data, output_file_name), unsafe_allow_html=True)
+    if uploaded_file is not None:
+        uploaded_file_name = uploaded_file.name
+        output_file_name = uploaded_file_name[0:uploaded_file_name.rfind('.')] + '_' + 'fmv'
+        with st.spinner(text='In progress...'):
+            uploaded_data = pd.read_csv(uploaded_file)
+            st.write(uploaded_data)
+            with st.sidebar:
+                data = execute(uploaded_data)
+            st.markdown(get_table_download_link_csv(data, output_file_name), unsafe_allow_html=True)
+            st.markdown(get_table_download_link_excel(data, output_file_name), unsafe_allow_html=True)
+
+
+if __name__ == "__main__":
+    main()
