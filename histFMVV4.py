@@ -18,6 +18,7 @@ import asyncio
 
 pd.set_option('display.max_columns', None)
 incomplete_set = set()
+alternative_dict = {'renBTC': 'BTC'}
 
 
 async def lookupFMV_Kaiko(date, token_symbol, before, after):
@@ -70,10 +71,17 @@ async def get_fmv(lookup, row_index, window=1):
     try:
         lookup.loc[row_index, 'fmv'], _ = await lookupFMV_Kaiko(row['datetime'], row['token_symbol'], window / 2,
                                                                 window / 2)
-    except Exception as err:
-        incomplete_set.add(row_index)
-        lookup.loc[row_index, 'fmv'] = -1
-        print(row['fmv_id'] + ': ' + str(err))
+    except Exception:
+        if window > 15 and row['token_symbol'] in alternative_dict:
+            try:
+                lookup.loc[row_index, 'fmv'], _ = await lookupFMV_Kaiko(row['datetime'], alternative_dict[row['token_symbol']],
+                                                                        window / 2,
+                                                                        window / 2)
+            except Exception as err:
+                lookup.loc[row_index, 'fmv'] = 0
+                print(row['fmv_id'] + ': ' + str(err))
+            else:
+                incomplete_set.remove(row_index)
     else:
         incomplete_set.remove(row_index)
 
@@ -134,6 +142,6 @@ def execute(file_name, maximum_attempt=5):
 # 14 failed in the end
 if __name__ == '__main__':
     semaphore = asyncio.Semaphore(2000)
-    file_name = 'test_v4.csv'
+    file_name = 'Bulk Upload v2.csv'
     data = execute(file_name, 8)
-    data.to_csv('test_v4.csv')
+    data.to_csv('bulk_fmv.csv')
