@@ -103,7 +103,7 @@ class CGL:
         pivot = pd.concat([temp_df1, temp_df2], ignore_index=True)
         pivot.dropna(inplace=True)
         pivot = pd.DataFrame({'pair': pivot, 'cr': 0, 'dr': 0, 'check': 0}).drop_duplicates()
-        pivot.reset_index(inplace=True)
+        pivot.reset_index(inplace=True, drop=True)
         for i, row in pivot.iterrows():
             pivot.loc[i, 'cr'] = self.data[self.data['cr'] == pivot.loc[i, 'pair']].count()['cr']
             pivot.loc[i, 'dr'] = self.data[self.data.dr == pivot.loc[i, 'pair']].count()['dr']
@@ -190,7 +190,7 @@ class CGL:
         return CGL
 
     def execute_calculation(self):
-        self.data.reset_index(inplace=True)
+        self.data.reset_index(inplace=True, drop=True)
         index = 0
         max_index = self.data.index.to_list()[-1]
 
@@ -206,6 +206,8 @@ class CGL:
             debit_asset = record.debitAsset
             credit_asset_fmv = record.creditAssetFMV
             FMV = record.histFMV
+            if FMV == 0:
+                FMV = record.debitAssetFMV
             id = record._id
             datetime = record.datetime
             balance, value_per_unit = 0, 0
@@ -227,6 +229,7 @@ class CGL:
                     new_row['debitAsset'] = credit_asset
                     new_row['debitAmount'] = offset_income_amount
                     new_row['debitAssetFMV'] = record['creditAssetFMV']
+                    new_row['histFMV'] = new_row['debitAssetFMV']
                     self.data.loc[index - 0.5] = new_row
                     self.data = self.data.sort_index().reset_index(drop=True)
                     max_index = self.data.index.to_list()[-1]
@@ -312,7 +315,7 @@ class CGL:
             , 'amount_changed': 'Balance Changed', 'value_changed': 'Value Changed', }, inplace=True)
         tx_report.set_index(['Account', 'Asset', 'Datetime'], inplace=True)
         tx_report.sort_index(inplace=True)
-        tx_report.reset_index(inplace=True)
+        tx_report.reset_index(inplace=True, drop=True)
         tx_report.to_csv("tx_report.csv", index=False)
 
     def generate_cgl_report(self, file_name):
@@ -355,14 +358,16 @@ if __name__ == '__main__':
     pd.set_option('display.max_columns', None)
     wallet_list = ['KeeperDAO', 'CTO Wallet', 'Prop Wallet', 'CTO Wallet 3', 'Labs Wallet', 'Binance']
     cgl = CGL()
-    # cgl.read_data('pre8949_fmv.csv')
+    cgl.read_data('pre8949_fmv.csv')
     # cgl.read_data('test_abnormal.csv')
     # cgl.read_data('test_v4.csv')
-    cgl.read_data('test_neg.csv')
+    # cgl.read_data('test_neg.csv')
     cgl.execute_calculation()
-    print(cgl.movement_tracker)
+    # print(cgl.movement_tracker)
     # print(cgl.data)
-    cgl.write_to_file('result_neg.csv')
+    # cgl.write_to_file('result_neg.csv')
+    cgl.write_to_file('pre8949_output.csv')
+    print(cgl.data)
     # cgl.generate_transactions_report()
     # cgl.generate_cgl_report('movement_tracker.csv')
     # print(time.perf_counter() - start_time)
