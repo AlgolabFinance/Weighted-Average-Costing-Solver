@@ -155,6 +155,8 @@ class CGL:
         if tx_type not in ['Trade', 'Sell']:
             raise Exception("Wrong txType: " + record['txType'])
         FMV = record.histFMV
+        if FMV == 0:
+            FMV = record.debitAssetFMV
         credit_account = record.creditAccount
         credit_amount = record.creditAmount
         credit_asset = record.creditAsset
