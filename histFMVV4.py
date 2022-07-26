@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 import pytz
 import aiohttp
 import asyncio
+import requests
 
 pd.set_option('display.max_columns', None)
 incomplete_set = set()
@@ -47,6 +48,7 @@ async def lookupFMV_Kaiko(date, token_symbol, before, after):
                             await asyncio.sleep(0.01)
                         print(response.status)
                         raise Exception("Response status is " + str(response.status))
+
                 json_data = (json.loads(text))
                 fmv = pd.DataFrame(json_data['data'])
                 fmv = fmv[~fmv['price'].isna()]

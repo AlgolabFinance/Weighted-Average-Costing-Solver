@@ -279,33 +279,29 @@ class CGL:
         cgl_report['value_changed'] = cgl_report['value_changed'].abs()
         cgl_report['proceeds_per_coin'] = cgl_report['proceeds'] / cgl_report['amount_changed']
         cgl_report['purchase_date'] = np.NAN
-        for i, row in cgl_report.iterrows():
-            account = row.account
-            asset = row.asset
-            cgl_report.loc[i, 'purchase_date'] = \
-            movement_tracker_df[(movement_tracker_df['account'] == account) & (movement_tracker_df['asset'] == asset)
-                                & (movement_tracker_df['previous_balance'] == 0)]['datetime'].to_list()[-1]
+        # for i, row in cgl_report.iterrows():
+        #     account = row.account
+        #     asset = row.asset
+        #     cgl_report.loc[i, 'purchase_date'] = \
+        #         cgl_book[(cgl_book['account'] == account) & (cgl_book['asset'] == asset)
+        #                  & (cgl_book['previous_balance'] == 0)]['datetime'].to_list()[-1]
         cgl_report.set_index(['account', 'asset'], inplace=True)
         cgl_report.sort_index(inplace=True)
         cgl_report.reset_index(inplace=True)
-        cgl_report.rename(columns={'account': 'COIN LOCATION', 'asset': 'ASSET', 'datetime': 'DATETIME',
-                                   'purchase_date': 'ORIGINAL PURCHASE DATE', "amount_changed": "AMOUNT",
+        cgl_report.rename(columns={'account': 'COIN LOCATION', 'asset': 'ASSET', 'datetime': 'PROCEED DATE',
+                                   "amount_changed": "QUANTITY",
                                    'previous_value': 'BASIS PER COIN', 'proceeds': 'PROCEEDS', 'value_changed': 'BASIS',
-                                   'proceeds_per_coin': 'PROCEEDS PER COIN', 'cgl': 'CAPITAL GAIN(LOSS)'}
+                                   'proceeds_per_coin': 'PROCEEDS PER COIN', 'cgl': 'CAPITAL GAIN(LOSS)', '_id': '_ID'}
                           , inplace=True)
+
         cgl_report = cgl_report[
-            ['COIN LOCATION', 'ASSET', 'DATETIME', 'ORIGINAL PURCHASE DATE', 'AMOUNT', 'BASIS PER COIN',
-             'BASIS', 'PROCEEDS', 'PROCEEDS PER COIN', 'CAPITAL GAIN(LOSS)']]
+            ['COIN LOCATION', 'ASSET', 'QUANTITY', 'PROCEED DATE', 'BASIS PER COIN', 'PROCEEDS PER COIN',
+             'BASIS', 'PROCEEDS', 'CAPITAL GAIN(LOSS)', '_ID']]
         cgl_report.to_csv('cgl_report.csv', index=False)
-        print(cgl_report)
-        return cgl_report
 
 
 def get_table_download_link_csv(df, file_name='output', description=''):
-    """Generates a link allowing the data in a given panda dataframe to be downloaded
-    in:  dataframe
-    out: href string
-    """
+    """Generates a link allowing the data in a given panda dataframe to be downloaded"""
     csv = df.to_csv(index=False)
     b64 = base64.b64encode(csv.encode()).decode()  # some strings <-> bytes conversions necessary here
     file_name += '.csv'
@@ -313,10 +309,7 @@ def get_table_download_link_csv(df, file_name='output', description=''):
 
 
 def get_table_download_link_excel(df, file_name='output', description=''):
-    """Generates a link allowing the data in a given panda dataframe to be downloaded
-    in:  dataframe
-    out: href string
-    """
+    """Generates a link allowing the data in a given panda dataframe to be downloaded"""
     towrite = io.BytesIO()
     file_excel = df.to_excel(towrite, encoding='utf-8', index=False, header=True)
     towrite.seek(0)  # reset pointer

@@ -1,10 +1,15 @@
 import collections
+import json
+import calendar
 
 import numpy as np
 import pandas as pd
 from decimal import Decimal
 import datetime as dt
 import time
+from datetime import timedelta
+
+import requests
 from pandas.api.types import CategoricalDtype
 
 
@@ -208,8 +213,6 @@ class CGL:
             debit_asset = record.debitAsset
             credit_asset_fmv = record.creditAssetFMV
             FMV = record.histFMV
-            if FMV == 0:
-                FMV = record.debitAssetFMV
             id = record._id
             datetime = record.datetime
             balance, value_per_unit = 0, 0
@@ -232,6 +235,7 @@ class CGL:
                     new_row['debitAmount'] = offset_income_amount
                     new_row['debitAssetFMV'] = record['creditAssetFMV']
                     new_row['histFMV'] = new_row['debitAssetFMV']
+                    new_row['creditAssetFMV'] = new_row['debitAssetFMV']
                     self.data.loc[index - 0.5] = new_row
                     self.data = self.data.sort_index().reset_index(drop=True)
                     max_index = self.data.index.to_list()[-1]
@@ -320,39 +324,118 @@ class CGL:
         tx_report.reset_index(inplace=True, drop=True)
         tx_report.to_csv("tx_report.csv", index=False)
 
-    def generate_cgl_report(self, file_name):
-        # cgl_report = pd.DataFrame(
-        #     {'coin_location': [], 'asset': [], 'original_purchase_date': [], 'current_balance': [],
-        #      'total_coin': [], 'basis_per_coin': [],
-        #      'basis_balance': [], 'proceeds_per_coin': [], 'total_proceeds': [],
-        #      'cgl': [], 'proceeds': []})
-        cgl_book = pd.read_csv(file_name)
-        cgl_report = cgl_book[cgl_book['cgl'] != 0]
+    def generate_cgl_report(self, movement_tracker_df):
+        cgl_report = movement_tracker_df[movement_tracker_df['cgl'] != 0]
         cgl_report = cgl_report[['account', 'asset', 'datetime', 'previous_value', 'value_changed',
                                  'cgl', 'proceeds', 'amount_changed', '_id', 'txHash']]
         cgl_report['amount_changed'] = cgl_report['amount_changed'].apply(abs)
         cgl_report['value_changed'] = cgl_report['value_changed'].abs()
         cgl_report['proceeds_per_coin'] = cgl_report['proceeds'] / cgl_report['amount_changed']
         cgl_report['purchase_date'] = np.NAN
-        for i, row in cgl_report.iterrows():
-            account = row.account
-            asset = row.asset
-            cgl_report.loc[i, 'purchase_date'] = \
-                cgl_book[(cgl_book['account'] == account) & (cgl_book['asset'] == asset)
-                         & (cgl_book['previous_balance'] == 0)]['datetime'].to_list()[-1]
+        # for i, row in cgl_report.iterrows():
+        #     account = row.account
+        #     asset = row.asset
+        #     cgl_report.loc[i, 'purchase_date'] = \
+        #         cgl_book[(cgl_book['account'] == account) & (cgl_book['asset'] == asset)
+        #                  & (cgl_book['previous_balance'] == 0)]['datetime'].to_list()[-1]
         cgl_report.set_index(['account', 'asset'], inplace=True)
         cgl_report.sort_index(inplace=True)
-        cgl_report.reset_index(inplace=True)
-        cgl_report.rename(columns={'account': 'COIN LOCATION', 'asset': 'ASSET', 'datetime': 'DATETIME',
-                                   'purchase_date': 'ORIGINAL PURCHASE DATE', "amount_changed": "AMOUNT",
+        cgl_report.reset_index(inplace=True, drop=True)
+        cgl_report.rename(columns={'account': 'COIN LOCATION', 'asset': 'ASSET', 'datetime': 'PROCEED DATE',
+                                   "amount_changed": "QUANTITY",
                                    'previous_value': 'BASIS PER COIN', 'proceeds': 'PROCEEDS', 'value_changed': 'BASIS',
-                                   'proceeds_per_coin': 'PROCEEDS PER COIN', 'cgl': 'CAPITAL GAIN(LOSS)'}
+                                   'proceeds_per_coin': 'PROCEEDS PER COIN', 'cgl': 'CAPITAL GAIN(LOSS)', '_id': '_ID'}
                           , inplace=True)
 
         cgl_report = cgl_report[
-            ['COIN LOCATION', 'ASSET', 'DATETIME', 'ORIGINAL PURCHASE DATE', 'AMOUNT', 'BASIS PER COIN',
-             'BASIS', 'PROCEEDS', 'PROCEEDS PER COIN', 'CAPITAL GAIN(LOSS)']]
+            ['COIN LOCATION', 'ASSET', 'QUANTITY', 'PROCEED DATE', 'BASIS PER COIN', 'PROCEEDS PER COIN',
+             'BASIS', 'PROCEEDS', 'CAPITAL GAIN(LOSS)', '_ID']]
         cgl_report.to_csv('cgl_report.csv', index=False)
+
+    def generate_unrealized_cgl_report(self, year, month, day, movement_tracker_df):
+        end_date = dt.datetime(year, month, day, 23, 59, 59)
+        end_date = end_date.strftime('%Y-%m-%dT%H:%M:%S.000Z')
+        dataset = movement_tracker_df[movement_tracker_df.datetime < end_date]
+        grouped = dataset.groupby(['account', 'asset'])
+        latest_balances = None
+        for (account, asset), group in grouped:
+            if latest_balances is None:
+                latest_balances = group.iloc[-1].to_frame().T
+            else:
+                latest_balances = pd.concat([latest_balances, group.iloc[-1].to_frame().T], ignore_index=True)
+        unrealized_report = latest_balances[['asset', 'account', 'current_balance', 'value_per_unit', 'current_value']]
+        unrealized_report = unrealized_report.sort_values(['asset'], ignore_index=True)
+        unrealized_report['FMV PER COIN'] = np.nan
+        unrealized_report['FMV BALANCE'] = np.nan
+        unrealized_report['UNREALIZED GAIN (LOSS)'] = np.nan
+        maximum_trial = 4
+        trial = 0
+        row_number = len(unrealized_report)
+        i = 0
+        price_dict = dict()
+        while i < row_number:
+            row = unrealized_report.iloc[i].copy()
+            token_symbol = row['asset']
+            print(token_symbol)
+            if token_symbol in price_dict:
+                unrealized_report.loc[i, 'FMV PER COIN'] = price_dict[token_symbol]
+                i += 1
+                continue
+            try:
+                unrealized_report.loc[i, 'FMV PER COIN'], _ = lookupFMV_Kaiko(end_date, token_symbol, 8, 8)
+            except Exception as err:
+                print(err)
+                if trial < maximum_trial:
+                    trial += 1
+                    unrealized_report.loc[i, 'FMV PER COIN'] = 0
+                else:
+                    trial = 0
+                    i += 1
+                    price_dict[token_symbol] = 0
+            else:
+                price_dict[token_symbol] = unrealized_report.loc[i, 'FMV PER COIN']
+                i += 1
+        unrealized_report.rename(columns={'account': 'COIN LOCATION', 'asset': 'ASSET', 'current_balance': 'TOTAL COINS',
+                                   'value_per_unit': 'BASIS PER COIN', 'current_value': 'BASIS BALANCE'}, inplace=True)
+        unrealized_report['FMV BALANCE'] = unrealized_report['TOTAL COINS'].astype('float') * unrealized_report['FMV PER COIN'].astype('float')
+        unrealized_report['UNREALIZED GAIN (LOSS)'] = unrealized_report['FMV BALANCE'] - unrealized_report['BASIS BALANCE']
+        print(unrealized_report)
+
+        return unrealized_report
+
+
+def lookupFMV_Kaiko(date, token_symbol, before, after):
+    date = str(date)[0:19] + "Z"
+    target_time = dt.datetime.strptime(str(date), '%Y-%m-%dT%H:%M:%SZ')
+    start_time = target_time - timedelta(hours=before)
+    start_time = str(start_time.strftime('%Y-%m-%dT%H:%M:%SZ'))
+    end_time = target_time + timedelta(hours=after)
+    end_time = str(end_time.strftime('%Y-%m-%dT%H:%M:%SZ'))
+    tx_url = "https://us.market-api.kaiko.io/v1/data/trades.v1/spot_exchange_rate/{}/usd"
+    params = dict({"start_time": start_time,
+                   "end_time": end_time,
+                   "interval": "1m",
+                   "page_size": 1000})
+    headers = {'x-api-key': 'b45d6e160228c4514fd747d8ab16cd08'}
+    response = requests.get(tx_url.format(str(token_symbol).lower()), headers=headers, params=params)
+    text = response.text
+    if response.status_code != 200:
+        if response.status_code == 400:
+            return 0, 0
+        else:
+            raise Exception("Response status is " + str(response.status_code))
+    json_data = (json.loads(text))
+    fmv = pd.DataFrame(json_data['data'])
+    fmv = fmv[~fmv['price'].isna()]
+    fmv['delta'] = 0.0
+    fmv['delta'] = ((fmv['timestamp'] / 1000 - calendar.timegm(target_time.timetuple())) / 3600).apply(abs)
+    price = fmv['price'][fmv['delta'] == fmv['delta'].min()].to_list()[0]
+    delta = fmv['delta'].min()
+    if abs(delta) < 1:
+        delta = str("{:.2f}".format(delta * 60)) + ' minutes'
+    else:
+        delta = str("{:.2f}".format(delta)) + ' hours'
+    return price, delta
 
 
 if __name__ == '__main__':
@@ -360,16 +443,17 @@ if __name__ == '__main__':
     pd.set_option('display.max_columns', None)
     wallet_list = ['KeeperDAO', 'CTO Wallet', 'Prop Wallet', 'CTO Wallet 3', 'Labs Wallet', 'Binance']
     cgl = CGL()
-    cgl.read_data('pre8949_fmv.csv')
+    # cgl.read_data('pre8949_fmv.csv')
     # cgl.read_data('test_abnormal.csv')
     # cgl.read_data('test_v4.csv')
     # cgl.read_data('test_neg.csv')
-    cgl.execute_calculation()
+    # cgl.execute_calculation()
     # print(cgl.movement_tracker)
     # print(cgl.data)
     # cgl.write_to_file('result_neg.csv')
-    cgl.write_to_file('pre8949_output.csv')
-    print(cgl.data)
+    # cgl.write_to_file('pre8949_output.csv')
     # cgl.generate_transactions_report()
-    # cgl.generate_cgl_report('movement_tracker.csv')
-    # print(time.perf_counter() - start_time)
+    movement_tracker_df = pd.read_csv('movement_tracker.csv')
+    # cgl.generate_cgl_report(movement_tracker_df)
+    cgl.generate_unrealized_cgl_report(2021, 2, 3, movement_tracker_df).to_csv('unrealized_cgl_report.csv')
+    print(time.perf_counter() - start_time)
