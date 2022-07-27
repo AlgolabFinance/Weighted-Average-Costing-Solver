@@ -302,60 +302,121 @@ class CGL:
         self.data.to_csv(file_name)
         self.movement_tracker.to_csv('movement_tracker.csv')
 
-    def generate_transactions_report(self):
+    def generate_transactions_report(self, movement_tracker_df, end_year, end_month,
+                                     end_day, start_year=2001, start_month=1, start_day=1):
         # tx_report = pd.DataFrame(
         #     {'Account': [], 'Asset': [], 'Datetime': [], 'Current Balance': [],
         #      'Average Value': [], 'Total Value': [],
         #      'Balance Before Change': [], 'Total Value Before Change': [], 'Balance Changed': [],
         #      'Value Changed': []})
         # tracker_book = pd.read_csv('movement_tracker.csv')
-        tx_report = pd.read_csv('movement_tracker.csv')
+        end_date = dt.datetime(end_year, end_month, end_day, 23, 59, 59)
+        end_date = end_date.strftime('%Y-%m-%dT%H:%M:%S.000Z')
+        start_date = dt.datetime(start_year, start_month, start_day, 0, 0, 0)
+        start_date = start_date.strftime('%Y-%m-%dT%H:%M:%S.000Z')
+        tx_report = movement_tracker_df[
+            (movement_tracker_df.datetime <= end_date) & (movement_tracker_df.datetime >= start_date)]
         tx_report = tx_report[['account', 'asset', 'datetime', 'current_balance', 'value_per_unit',
                                'current_value', 'previous_balance', 'amount_changed', 'value_changed',
                                'previous_value']]
         tx_report['Total Value Before Change'] = tx_report['previous_value'] * tx_report['previous_balance']
         tx_report.drop('previous_value', axis=1, inplace=True)
         tx_report.rename(columns={'account': 'Account', 'asset': 'Asset', 'datetime': 'Datetime',
-                                  'current_balance': 'Current Balance', 'value_per_unit': 'Average Value',
+                                  'current_balance': 'Current Balance', 'value_per_unit': 'Basis Per Unit',
                                   'current_value': 'Total Value', 'previous_balance': 'Balance Before Change'
             , 'amount_changed': 'Balance Changed', 'value_changed': 'Value Changed', }, inplace=True)
         tx_report.set_index(['Account', 'Asset', 'Datetime'], inplace=True)
         tx_report.sort_index(inplace=True)
-        tx_report.reset_index(inplace=True, drop=True)
-        tx_report.to_csv("tx_report.csv", index=False)
+        tx_report.reset_index(inplace=True)
+        return tx_report
 
-    def generate_cgl_report(self, movement_tracker_df):
-        cgl_report = movement_tracker_df[movement_tracker_df['cgl'] != 0]
+    def generate_transactions_report_by_year(self, movement_tracker_df, start_year, end_year):
+        min_datetime = movement_tracker_df.loc[0, 'datetime']
+        min_year = int(min_datetime[0:4])
+        max_datetime = movement_tracker_df.iloc[-1]['datetime']
+        max_year = int(max_datetime[0:4])
+        if end_year > max_year:
+            end_year = max_year
+        if start_year < min_year:
+            start_year = min_year
+        while start_year <= end_year:
+            previous_report = self.generate_transactions_report(movement_tracker_df, start_year, 12, 31,
+                                                                  start_year, 1, 1)
+            previous_report.to_csv(str(start_year) + '-tx-report.csv')
+            start_year += 1
+
+
+    def generate_cgl_report(self, movement_tracker_df, end_year, end_month, end_day,
+                                       start_year=2001, start_month=1, start_day=1):
+        end_date = dt.datetime(end_year, end_month, end_day, 23, 59, 59)
+        end_date = end_date.strftime('%Y-%m-%dT%H:%M:%S.000Z')
+        start_date = dt.datetime(start_year, start_month, start_day, 0, 0, 0)
+        start_date = start_date.strftime('%Y-%m-%dT%H:%M:%S.000Z')
+        dataset = movement_tracker_df[
+            (movement_tracker_df.datetime <= end_date) & (movement_tracker_df.datetime >= start_date)]
+        # print(dataset)
+        cgl_report = dataset[dataset['cgl'] != 0]
+        if cgl_report.empty:
+            return None
         cgl_report = cgl_report[['account', 'asset', 'datetime', 'previous_value', 'value_changed',
                                  'cgl', 'proceeds', 'amount_changed', '_id', 'txHash']]
         cgl_report['amount_changed'] = cgl_report['amount_changed'].apply(abs)
         cgl_report['value_changed'] = cgl_report['value_changed'].abs()
         cgl_report['proceeds_per_coin'] = cgl_report['proceeds'] / cgl_report['amount_changed']
-        cgl_report['purchase_date'] = np.NAN
+        # cgl_report['purchase_date'] = np.NAN
         # for i, row in cgl_report.iterrows():
         #     account = row.account
         #     asset = row.asset
         #     cgl_report.loc[i, 'purchase_date'] = \
         #         cgl_book[(cgl_book['account'] == account) & (cgl_book['asset'] == asset)
         #                  & (cgl_book['previous_balance'] == 0)]['datetime'].to_list()[-1]
+
         cgl_report.set_index(['account', 'asset'], inplace=True)
         cgl_report.sort_index(inplace=True)
-        cgl_report.reset_index(inplace=True, drop=True)
+        cgl_report.reset_index(inplace=True)
+        cgl_report['OPENING BALANCE'] = 0
+        prior_dataset = movement_tracker_df[movement_tracker_df['datetime'] <= start_date]
+        print(cgl_report)
+        for i, row in cgl_report.iterrows():
+            record = prior_dataset[(prior_dataset['account'] == row['account']) &
+                          (prior_dataset['asset'] == row['asset'])]
+            if not record.empty:
+                cgl_report.loc[i, 'OPENING BALANCE'] = record.current_balance.to_list()[-1]
+
+
         cgl_report.rename(columns={'account': 'COIN LOCATION', 'asset': 'ASSET', 'datetime': 'PROCEED DATE',
                                    "amount_changed": "QUANTITY",
                                    'previous_value': 'BASIS PER COIN', 'proceeds': 'PROCEEDS', 'value_changed': 'BASIS',
                                    'proceeds_per_coin': 'PROCEEDS PER COIN', 'cgl': 'CAPITAL GAIN(LOSS)', '_id': '_ID'}
                           , inplace=True)
-
         cgl_report = cgl_report[
             ['COIN LOCATION', 'ASSET', 'QUANTITY', 'PROCEED DATE', 'BASIS PER COIN', 'PROCEEDS PER COIN',
-             'BASIS', 'PROCEEDS', 'CAPITAL GAIN(LOSS)', '_ID']]
-        cgl_report.to_csv('cgl_report.csv', index=False)
+             'BASIS', 'PROCEEDS', 'CAPITAL GAIN(LOSS)', 'OPENING BALANCE', '_ID']]
+        return cgl_report
 
-    def generate_unrealized_cgl_report(self, year, month, day, movement_tracker_df):
-        end_date = dt.datetime(year, month, day, 23, 59, 59)
+    def generate_cgl_report_by_year(self, movement_tracker_df, start_year, end_year):
+        min_datetime = movement_tracker_df.loc[0, 'datetime']
+        min_year = int(min_datetime[0:4])
+        max_datetime = movement_tracker_df.iloc[-1]['datetime']
+        max_year = int(max_datetime[0:4])
+        if end_year > max_year:
+            end_year = max_year
+        if start_year < min_year:
+            start_year = min_year
+        while start_year <= end_year:
+            report = self.generate_cgl_report(movement_tracker_df, start_year, 12, 31,
+                                                                      start_year, 1, 1)
+            if report is not None:
+                report.to_csv(str(start_year) + '-cgl-report.csv')
+            start_year += 1
+
+    def generate_unrealized_cgl_report(self, movement_tracker_df, end_year, end_month, end_day,
+                                       start_year=2001, start_month=1, start_day=1):
+        end_date = dt.datetime(end_year, end_month, end_day, 23, 59, 59)
         end_date = end_date.strftime('%Y-%m-%dT%H:%M:%S.000Z')
-        dataset = movement_tracker_df[movement_tracker_df.datetime < end_date]
+        start_date = dt.datetime(start_year, start_month, start_day, 0, 0, 0)
+        start_date = start_date.strftime('%Y-%m-%dT%H:%M:%S.000Z')
+        dataset = movement_tracker_df[(movement_tracker_df.datetime <= end_date)]
         grouped = dataset.groupby(['account', 'asset'])
         latest_balances = None
         for (account, asset), group in grouped:
@@ -363,10 +424,11 @@ class CGL:
                 latest_balances = group.iloc[-1].to_frame().T
             else:
                 latest_balances = pd.concat([latest_balances, group.iloc[-1].to_frame().T], ignore_index=True)
+        print(latest_balances)
         unrealized_report = latest_balances[['asset', 'account', 'current_balance', 'value_per_unit', 'current_value']]
         unrealized_report = unrealized_report.sort_values(['asset'], ignore_index=True)
-        unrealized_report['FMV PER COIN'] = np.nan
-        unrealized_report['FMV BALANCE'] = np.nan
+        unrealized_report['FMV PER UNIT'] = np.nan
+        unrealized_report['TOTAL USD VALUE'] = np.nan
         unrealized_report['UNREALIZED GAIN (LOSS)'] = np.nan
         maximum_trial = 4
         trial = 0
@@ -378,33 +440,61 @@ class CGL:
             token_symbol = row['asset']
             print(token_symbol)
             if token_symbol in price_dict:
-                unrealized_report.loc[i, 'FMV PER COIN'] = price_dict[token_symbol]
+                unrealized_report.loc[i, 'FMV PER UNIT'] = price_dict[token_symbol]
                 i += 1
                 continue
             try:
-                unrealized_report.loc[i, 'FMV PER COIN'], _ = lookupFMV_Kaiko(end_date, token_symbol, 8, 8)
+                unrealized_report.loc[i, 'FMV PER UNIT'], _ = lookupFMV_Kaiko(end_date, token_symbol, 8, 8)
             except Exception as err:
                 print(err)
                 if trial < maximum_trial:
                     trial += 1
-                    unrealized_report.loc[i, 'FMV PER COIN'] = 0
+                    unrealized_report.loc[i, 'FMV PER UNIT'] = 0
                 else:
                     trial = 0
                     i += 1
                     price_dict[token_symbol] = 0
             else:
-                price_dict[token_symbol] = unrealized_report.loc[i, 'FMV PER COIN']
+                price_dict[token_symbol] = unrealized_report.loc[i, 'FMV PER UNIT']
                 i += 1
-        unrealized_report.rename(columns={'account': 'COIN LOCATION', 'asset': 'ASSET', 'current_balance': 'TOTAL COINS',
-                                   'value_per_unit': 'BASIS PER COIN', 'current_value': 'BASIS BALANCE'}, inplace=True)
-        unrealized_report['FMV BALANCE'] = unrealized_report['TOTAL COINS'].astype('float') * unrealized_report['FMV PER COIN'].astype('float')
-        unrealized_report['UNREALIZED GAIN (LOSS)'] = unrealized_report['FMV BALANCE'] - unrealized_report['BASIS BALANCE']
-        print(unrealized_report)
+        unrealized_report.rename(columns={'account': 'COIN LOCATION', 'asset': 'ASSET', 'current_balance': 'TOTAL BALANCE',
+                                   'value_per_unit': 'BASIS PER UNIT', 'current_value': 'BASIS BALANCE'}, inplace=True)
+        unrealized_report['TOTAL USD VALUE'] = unrealized_report['TOTAL BALANCE'].astype('float') * \
+                                           unrealized_report['FMV PER UNIT'].astype('float')
+        unrealized_report['UNREALIZED GAIN (LOSS)'] = unrealized_report['TOTAL USD VALUE'] - unrealized_report['BASIS BALANCE']
+        unrealized_report['OPENING BALANCE'] = 0
+        # unrealized_report['OPENING BASIS PER UNIT'] = 0
+        # unrealized_report['OPENING BASIS BALANCE'] = 0
+        prior_dataset = movement_tracker_df[movement_tracker_df['datetime'] <= start_date]
+        for i, row in unrealized_report.iterrows():
+            record = dataset[(prior_dataset['account'] == row['COIN LOCATION']) &
+                          (prior_dataset['asset'] == row['ASSET'])]
+            if not record.empty:
+                unrealized_report.loc[i, 'OPENING BALANCE'] = record.current_balance.to_list()[-1]
 
+        print(unrealized_report)
         return unrealized_report
+
+    def generate_unrealized_report_by_year(self, movement_tracker_df, start_year, end_year):
+        min_datetime = movement_tracker_df.loc[0, 'datetime']
+        min_year = int(min_datetime[0:4])
+        max_datetime = movement_tracker_df.iloc[-1]['datetime']
+        max_year = int(max_datetime[0:4])
+        if end_year > max_year:
+            end_year = max_year
+        if start_year < min_year:
+            start_year = min_year
+        while start_year <= end_year:
+            previous_report = self.generate_unrealized_cgl_report(movement_tracker_df, start_year, 12, 31,
+                                                                  start_year, 1, 1)
+            previous_report.to_csv(str(start_year) + '-unrealized-report.csv')
+            start_year += 1
+
 
 
 def lookupFMV_Kaiko(date, token_symbol, before, after):
+    if '-' in token_symbol:
+        return 0, 0
     date = str(date)[0:19] + "Z"
     target_time = dt.datetime.strptime(str(date), '%Y-%m-%dT%H:%M:%SZ')
     start_time = target_time - timedelta(hours=before)
@@ -452,8 +542,11 @@ if __name__ == '__main__':
     # print(cgl.data)
     # cgl.write_to_file('result_neg.csv')
     # cgl.write_to_file('pre8949_output.csv')
-    # cgl.generate_transactions_report()
     movement_tracker_df = pd.read_csv('movement_tracker.csv')
+    cgl.generate_transactions_report(movement_tracker_df, 2021, 12, 31).to_csv('tx_report.csv')
+    cgl.generate_transactions_report_by_year(movement_tracker_df, 2019, 2022)
+    cgl.generate_cgl_report_by_year(movement_tracker_df, 2019, 2022)
     # cgl.generate_cgl_report(movement_tracker_df)
-    cgl.generate_unrealized_cgl_report(2021, 2, 3, movement_tracker_df).to_csv('unrealized_cgl_report.csv')
+    # cgl.generate_unrealized_cgl_report(movement_tracker_df, 2021, 12, 31).to_csv('unrealized_cgl_report.csv')
+    # cgl.generate_unrealized_report_by_year(movement_tracker_df, 2022, 2022)
     print(time.perf_counter() - start_time)
