@@ -382,8 +382,6 @@ class CGL:
                           (prior_dataset['asset'] == row['asset'])]
             if not record.empty:
                 cgl_report.loc[i, 'OPENING BALANCE'] = record.current_balance.to_list()[-1]
-
-
         cgl_report.rename(columns={'account': 'COIN LOCATION', 'asset': 'ASSET', 'datetime': 'PROCEED DATE',
                                    "amount_changed": "QUANTITY",
                                    'previous_value': 'BASIS PER COIN', 'proceeds': 'PROCEEDS', 'value_changed': 'BASIS',
@@ -467,7 +465,7 @@ class CGL:
         # unrealized_report['OPENING BASIS BALANCE'] = 0
         prior_dataset = movement_tracker_df[movement_tracker_df['datetime'] <= start_date]
         for i, row in unrealized_report.iterrows():
-            record = dataset[(prior_dataset['account'] == row['COIN LOCATION']) &
+            record = prior_dataset[(prior_dataset['account'] == row['COIN LOCATION']) &
                           (prior_dataset['asset'] == row['ASSET'])]
             if not record.empty:
                 unrealized_report.loc[i, 'OPENING BALANCE'] = record.current_balance.to_list()[-1]
