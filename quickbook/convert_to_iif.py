@@ -13,6 +13,7 @@ def convert_to_iif(file_name, is_transfer=False):
         debit_data = pd.read_excel(file_name, sheet_name='Debit', dtype=str)
         credit_data = pd.read_excel(file_name, sheet_name='Credit', dtype=str)
     iif = pd.DataFrame({'specifier':['!TRNS', '!SPL', '!ENDTRANS'], 'date': ['DATE', 'DATE', ''], 'tx_type':['TRNSTYPE','TRNSTYPE', ''],
+                         'doc_num': ['DOCNUM', 'DOCNUM', ''],
                         'account': ['ACCNT', 'ACCNT', ''],
                 'amount': ['AMOUNT', 'AMOUNT', ''], 'memo': ['MEMO', 'MEMO', '']})
     #trans = pd.DataFrame({'specifier':['TRANS'], 'date':[''], 'account':[''], 'docnum':[''], 'class':[''], 'amount':[''], 'amount_memo':['']})
