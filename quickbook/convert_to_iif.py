@@ -3,8 +3,7 @@ import calendar
 from dateutil.parser import parse
 
 
-# structure_dict = {'specifier':[], 'date':[], 'account':[], 'docnum':[], 'class':[], 'amount':[], 'amount_memo':[]}
-# iif = pd.DataFrame(structure_dict)
+
 def convert_to_iif(file_name, is_transfer=False):
     data = None
     if is_transfer:
@@ -77,11 +76,13 @@ if __name__ == '__main__':
     res0_credit.to_csv(path + '202110_Deposit_Withdrawal_Credit.iif', sep='\t', index=False, header=False)
     cal = calendar.month(2021, 10)
     #print(cal)
-    # file1 = path + '202102_Deposit_Withdrawal.xlsx'
-    # file2 = path + '202102_Trade_Buy_Sell_Convert.xlsx'
-    # file3 = path + '202102_Transfer.xlsx'
-    # res1 = convert_to_iif(file1)
-    # res2 = convert_to_iif(file2)
+    file1 = path + '202102_Deposit_Withdrawal.xlsx'
+    file2 = path + '202102_Trade_Buy_Sell_Convert.xlsx'
+    file3 = path + '202102_Transfer.xlsx'
+    res1_debit, res1_credit = convert_to_iif(file1)
+    res1_debit.to_csv(path + 'debit_deposit_withdrawal.iif', sep='\t')
+    res1_credit.to_csv(path + 'credit_deposit_withdrawal.iif', sep='\t')
+    res2_debit, res2_credit = convert_to_iif(file2)
     # res3 = convert_to_iif(file3, True)
     # res1.to_csv(path + 'deposit_withdrawal.iif', sep='\t')
     # res2.to_csv(path + 'trade_buy_sell_convert.iif', sep='\t')
