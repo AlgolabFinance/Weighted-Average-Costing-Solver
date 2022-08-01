@@ -15,7 +15,7 @@ def convert_to_iif(file_name, is_debit_only=False):
             debit_data = pd.read_excel(file_name, sheet_name='Debit', dtype={'date': 'str'})
             credit_data = pd.read_excel(file_name, sheet_name='Credit', dtype={'date': 'str'})
     except Exception:
-        print('Empty File Or Wrong Sheet Name.')
+        print('Empty File Or Wrong Sheet Name: ' + file_name)
         return None, None
 
     iif = pd.DataFrame({'specifier':['!TRNS', '!SPL', '!ENDTRANS'], 'date': ['DATE', 'DATE', ''], 'tx_type':['TRNSTYPE','TRNSTYPE', ''],
@@ -71,7 +71,6 @@ def convert_to_iif(file_name, is_debit_only=False):
         debit_iif.to_excel(writer, sheet_name='DEBIT IIF', index=False, header=False)
         credit_iif.to_excel(writer, sheet_name='CREDIT IIF', index=False, header=False)
 
-    print(credit_iif['memo'])
     return debit_iif, credit_iif
 
 
