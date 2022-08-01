@@ -5,10 +5,10 @@ from cgl_iif import *
 
 
 
-def convert_to_iif(file_name, is_transfer=False):
+def convert_to_iif(file_name, is_debit_only=False):
     data = None
     try:
-        if is_transfer:
+        if is_debit_only:
             debit_data = pd.read_excel(file_name, sheet_name='Debit', dtype={'date': 'str'})
             credit_data = None
         else:
@@ -75,7 +75,7 @@ def convert_to_iif(file_name, is_transfer=False):
     return debit_iif, credit_iif
 
 
-def is_transfer(file_name):
+def is_debit_only(file_name):
     keywords = ['trade', 'buy', 'sell', 'convert', 'transfer']
     file_name = file_name.lower()
     for keyword in keywords:
@@ -97,7 +97,7 @@ def convert_all_files(path, is_cgl=False):
     else:
         for file_name in file_list:
             prefix = file_name.split('.')[-2]
-            if is_transfer(file_name):
+            if is_debit_only(file_name):
                 debit_iif, _ = convert_to_iif(file_name, True)
                 if debit_iif is not None:
                     debit_iif.to_csv(prefix + '.iif')
