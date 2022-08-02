@@ -432,7 +432,7 @@ class CGL:
                 latest_balances = group.iloc[-1].to_frame().T
             else:
                 latest_balances = pd.concat([latest_balances, group.iloc[-1].to_frame().T], ignore_index=True)
-        print(latest_balances)
+        # (latest_balances)
         unrealized_report = latest_balances[['asset', 'account', 'current_balance', 'value_per_unit', 'current_value']]
         unrealized_report = unrealized_report.sort_values(['asset'], ignore_index=True)
         unrealized_report['FMV PER UNIT'] = np.nan
@@ -446,7 +446,7 @@ class CGL:
         while i < row_number:
             row = unrealized_report.iloc[i].copy()
             token_symbol = row['asset']
-            print(token_symbol)
+            # print(token_symbol)
             if token_symbol in price_dict:
                 unrealized_report.loc[i, 'FMV PER UNIT'] = price_dict[token_symbol]
                 i += 1
@@ -454,7 +454,7 @@ class CGL:
             try:
                 unrealized_report.loc[i, 'FMV PER UNIT'], _ = lookupFMV_Kaiko(end_date, token_symbol, 8, 8)
             except Exception as err:
-                print(err)
+                # print(err)
                 if trial < maximum_trial:
                     trial += 1
                     unrealized_report.loc[i, 'FMV PER UNIT'] = 0
@@ -482,7 +482,7 @@ class CGL:
             if not record.empty:
                 unrealized_report.loc[i, 'OPENING BALANCE'] = record.current_balance.to_list()[-1]
 
-        print(unrealized_report)
+        # print(unrealized_report)
         return unrealized_report
 
     def generate_unrealized_report_by_year(self, movement_tracker_df, start_year, end_year):
@@ -566,6 +566,12 @@ def get_zip_download_link(path, file_name, description=''):
         file_name += '.zip'
         return f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download={file_name}>Download {description} ZIP</a>'
 
+def get_excel_download_link(path, file_name, description=''):
+    with open(path, 'rb') as f:
+        b64 = base64.b64encode(f.read()).decode()
+        file_name += '.xlsx'
+        return f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download={file_name}>Download {description} XLSX</a>'
+
 
 if __name__ == '__main__':
     wallet_list = ['KeeperDAO', 'CTO Wallet', 'Prop Wallet', 'CTO Wallet 3', 'Labs Wallet', 'Binance']
@@ -630,48 +636,54 @@ if __name__ == '__main__':
                         file = cgl_report.to_csv(path)
                         cgl_file.write(path)
                     cgl_file.close()
+                    with pd.ExcelWriter(file_name + '.xlsx') as writer:
+                        for (cgl_report, cgl_year) in zip(cgl_reports, cgl_years):
+                            cgl_report.to_excel(writer, sheet_name=str(cgl_year), encoding='utf-8')
+
                     with st.sidebar:
                         st.markdown(get_zip_download_link(file_name, file_name, 'CGL Reports'), unsafe_allow_html=True)
+                        st.markdown(get_excel_download_link(file_name + '.xlsx', file_name, 'CGL Reports'), unsafe_allow_html=True)
+
                 if check_unrealized:
                     unrealized_reports, unrealized_years = cgl.generate_unrealized_report_by_year(cgl.movement_tracker,
-                                                                                                  start_year, end_year)
-                    start_year = int(start_year_input)
-                    end_year = int(end_year_input)
-                    if check_unrealized:
-                        cgl_reports, cgl_years = cgl.generate_unrealized_report_by_year(cgl.movement_tracker,
                                                                                         start_year,
                                                                                         end_year)
-                        file_name = 'unrealized_by_year'
-                        unrealized_file = zipfile.ZipFile(file_name, 'w')
-                        for (unrealized_report, unrealized_year) in zip(cgl_reports, cgl_years):
-                            path = str(unrealized_year) + '-unrealized-report.csv'
-                            file = cgl_report.to_csv(path)
-                            unrealized_file.write(path)
-                        unrealized_file.close()
-                        with st.sidebar:
-                            st.markdown(get_zip_download_link(file_name, file_name, 'Unrealized Reports'),
+                    file_name = 'unrealized_by_year'
+                    unrealized_file = zipfile.ZipFile(file_name, 'w')
+                    for (unrealized_report, unrealized_year) in zip(unrealized_reports, unrealized_years):
+                        path = str(unrealized_year) + '-unrealized-report.csv'
+                        file = unrealized_report.to_csv(path)
+                        unrealized_file.write(path)
+                    unrealized_file.close()
+
+                    with pd.ExcelWriter(file_name + '.xlsx') as writer:
+                        for (unrealized_report, unrealized_year) in zip(unrealized_reports, unrealized_years):
+                            unrealized_report.to_excel(writer, sheet_name=str(unrealized_year), encoding='utf-8')
+
+                    with st.sidebar:
+                        st.markdown(get_zip_download_link(file_name, file_name, 'Unrealized Reports'),
                                         unsafe_allow_html=True)
+                        st.markdown(get_excel_download_link(file_name + '.xlsx', file_name, 'Unrealized Reports'),
+                                    unsafe_allow_html=True)
                 if check_tx:
-                    tx_reports, tx_years = cgl.generate_transactions_report_by_year(cgl.movement_tracker, start_year,
-                                                                                    end_year)
-                    unrealized_reports, unrealized_years = cgl.generate_unrealized_report_by_year(cgl.movement_tracker,
-                                                                                                  start_year, end_year)
-                    start_year = int(start_year_input)
-                    end_year = int(end_year_input)
-                    if check_tx:
-                        tx_reports, tx_years = cgl.generate_transactions_report_by_year(cgl.movement_tracker,
+                    tx_reports, tx_years = cgl.generate_transactions_report_by_year(cgl.movement_tracker,
                                                                                         start_year,
                                                                                         end_year)
-                        file_name = 'tx_by_year'
-                        tx_file = zipfile.ZipFile(file_name, 'w')
-                        for (unrealized_report, unrealized_year) in zip(cgl_reports, cgl_years):
-                            path = str(unrealized_year) + '-tx-report.csv'
-                            file = cgl_report.to_csv(path)
-                            tx_file.write(path)
-                        tx_file.close()
-                        with st.sidebar:
-                            st.markdown(get_zip_download_link(file_name, file_name, 'Transaction Reports'),
+                    file_name = 'tx_by_year'
+                    tx_file = zipfile.ZipFile(file_name, 'w')
+                    for (unrealized_report, unrealized_year) in zip(cgl_reports, cgl_years):
+                        path = str(unrealized_year) + '-tx-report.csv'
+                        file = cgl_report.to_csv(path)
+                        tx_file.write(path)
+                    tx_file.close()
+                    with pd.ExcelWriter(file_name + '.xlsx') as writer:
+                        for (tx_report, tx_year) in zip(tx_reports, tx_years):
+                            tx_report.to_excel(writer, sheet_name=str(tx_year), encoding='utf-8')
+                    with st.sidebar:
+                        st.markdown(get_zip_download_link(file_name, file_name, 'Transaction Reports'),
                                         unsafe_allow_html=True)
+                        st.markdown(get_excel_download_link(file_name + '.xlsx', file_name, 'Transaction Reports'),
+                                    unsafe_allow_html=True)
 
             # st.markdown(get_table_download_link_csv(data, output_file_name), unsafe_allow_html=True)
             # st.markdown(get_table_download_link_excel(data, output_file_name), unsafe_allow_html=True)
