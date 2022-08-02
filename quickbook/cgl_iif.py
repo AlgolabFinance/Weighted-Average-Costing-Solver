@@ -18,8 +18,10 @@ import glob
 #                           + data['asset'] + ' - Net Capital Gain & Loss'
 #     return data
 
+
 def get_grouped_cgl(file_name, sheet_name=0):
-    data = pd.read_excel(file_name, sheet_name=sheet_name, engine='openpyxl')
+    # data = pd.read_excel(file_name, sheet_name=sheet_name, engine='openpyxl')
+    data = pd.read_csv(file_name)
     if data.empty:
         return None, None
     data['class'] = np.NAN
@@ -33,13 +35,22 @@ def get_grouped_cgl(file_name, sheet_name=0):
         data.loc[long_term_index:, 'class'] = 'Long Term'
     data = data[~data['Date sold or disposed of'].isna()]
     data['month'] = data['Date sold or disposed of'].astype(str).str[0:7]
-    for i, row in data.iterrows():
-        asset = row['Description of property'].split('-')[0]
-        data.loc[i, 'asset'] = asset
-    data = data.groupby(['month', 'asset', 'class'], as_index=False)['Gain or (loss)'].sum()
+
+    # For mapping ERC721, ERC1155 Token
+    data['asset'] = data['Description of property'].str[0:-25]
+    for token_name in listNFT:
+        data.loc[data['asset'].str.contains(token_name), 'asset'] = token_name
+
+    data = pd.merge(data, mapping, how='left', left_on='asset', right_on='cryptoCurrency')
+    # print(data['asset'])
+    # for i, row in data.iterrows():
+    #     asset = row['Description of property'].split('-')[0]
+    #     data.loc[i, 'asset'] = asset
+    data = data.groupby(['month', 'asset', 'class', 'quickbookAccount'], as_index=False)['Gain or (loss)'].sum()
     data['account'] = '11000 Cryptocurrency:' + data['asset']
     data['opp_account'] = '80000 Crypto Gains/(Losses):Crypto - Capital Gains & Losses:' \
                           + data['asset'] + ' - Net Capital Gain & Loss'
+    data['account'] = data['quickbookAccount']
     long_term_data = data[data['class'] == 'Long Term']
     short_term_data = data[data['class'] == 'Short Term']
     return short_term_data, long_term_data
@@ -65,9 +76,14 @@ def generate_monthly_iif(cgl_df):
         account = row['account']
         opp_account = row['opp_account']
         amount = row['Gain or (loss)']
+        amount = round(amount, 2)
         str_month = row['month'][-2:]
         str_year = row['month'][0:4]
-        memo = month_dict[str_month] + ' ' + str_year + ' ' + row['asset'] + ' Net Capital Gain'
+        memo = month_dict[str_month] + ' ' + str_year + ' ' + row['asset']
+        if amount >= 0:
+            memo += ' Net Capital Gain'
+        else:
+            memo += ' Net Capital Loss'
         tx_type = 'GENERAL JOURNAL'
         doc_num = month_dict[str_month][0:3].upper() + str_year + 'CG&L'
         new_row = pd.DataFrame({'specifier': [specifier], 'date': [date], 'tx_type': [tx_type], 'doc_num': [doc_num],
@@ -104,8 +120,9 @@ def convert_cgl_to_iif(file_name):
         month_iif = generate_monthly_iif(month_data)
         long_term_iif = pd.concat([long_term_iif, month_iif], ignore_index=True)
 
-    with pd.ExcelWriter(file_name, mode='a', if_sheet_exists='replace') as writer:
+    with pd.ExcelWriter(file_name.replace('.csv', '.xlsx'), mode='w') as writer:
         short_term_iif.to_excel(writer, sheet_name='Short Term IIF', index=False, header=False)
+    with pd.ExcelWriter(file_name.replace('.csv', '.xlsx'), mode='a', if_sheet_exists='replace') as writer:
         long_term_iif.to_excel(writer, sheet_name='Long Term IIF', index=False, header=False)
     return long_term_iif, short_term_iif
 
@@ -119,13 +136,19 @@ def convert_cgl_to_iif(file_name):
     #             shor_term_iif.to_csv(prefix + '_short_term.iif', sep='\t')
 
 
-# if __name__ == '__main__':
-#     path = '/Users/tonghaoyang/PycharmProjects/Weighted-Average-Costing-Solver2/quickbook/'
-#     pd.set_option('display.max_columns', None)
-#     # file_name = path + '2022 FIFO.xlsx'
-#     # file_name2 = path + '8949/' + '62e450d070fa9d1da684b2a7_2022_FIFO.xlsx'
-#     # long_term_iif, short_term_iif = convert_cgl_to_iif(file_name2)
-#     # long_term_iif.to_csv('long_term_iif.iif', sep='\t')
-#     # short_term_iif.to_csv('short_term_iif.iif', sep='\t')
+if __name__ == '__main__':
+    path = '/Users/tonghaoyang/PycharmProjects/Weighted-Average-Costing-Solver2/quickbook/'
+    pd.set_option('display.max_columns', None)
+    # file_name = path + '2022 FIFO.xlsx'
+    file_name2 = path + '8949/' + '62e450d070fa9d1da684b2a7_2022_FIFO.csv'
+    mapping = pd.read_excel(path + 'mapping.xlsx', sheet_name='Wallet Directory')
+    mapping = mapping[~mapping['cryptoCurrency'].isna()][['cryptoCurrency', 'quickbookAccount']]
+    listNFT = mapping[(mapping['quickbookAccount'].str.contains('1155'))
+                       | (mapping['quickbookAccount'].str.contains('721'))]['cryptoCurrency'].tolist()
+    # print(listNFT)
+    print(mapping)
+    long_term_iif, short_term_iif = convert_cgl_to_iif(file_name2)
+    # long_term_iif.to_csv('long_term_iif.iif', sep='\t')
+    # short_term_iif.to_csv('short_term_iif.iif', sep='\t')
 #     convert_all_files(path + '8949/', True)
 

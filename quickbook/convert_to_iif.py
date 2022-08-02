@@ -37,7 +37,7 @@ def convert_to_iif(file_name, is_debit_only=False):
             month = date.month
             day = calendar.month(int(year), int(month))[-3:-1]
             date = str(month) + '/' + str(day) + '/' + str(year)
-            amount = row['Amount(USD)']
+            amount = round(row['Amount(USD)'], 2)
             memo = row['memo']
             new_trans_row = pd.DataFrame({'specifier':[specifier], 'date':[date], 'tx_type':[tx_type],
                                     'account':[account],  'amount':[amount], 'memo':[memo]})
@@ -88,20 +88,25 @@ def convert_all_files(path, is_cgl=False):
     if is_cgl:
         for file_name in file_list:
             prefix = file_name.split('.')[-2]
-            long_term_iif, shor_term_iif = convert_cgl_to_iif(file_name)
+            long_term_iif, short_term_iif = convert_cgl_to_iif(file_name)
+            # long_term_iif['amount'] = long_term_iif['amount'].apply(lambda x: round(x, 2))
+            # short_term_iif['amount'] = long_term_iif['amount'].apply(lambda x: round(x, 2))
             if long_term_iif is not None:
-                long_term_iif.to_csv(prefix + '_long_term.iif', sep='\t')
-            if shor_term_iif is not None:
-                shor_term_iif.to_csv(prefix + '_short_term.iif', sep='\t')
+                long_term_iif.to_csv(prefix + '_long_term.iif', sep='\t', index=False, header=False)
+            if short_term_iif is not None:
+                short_term_iif.to_csv(prefix + '_short_term.iif', sep='\t', index=False, header=False)
     else:
         for file_name in file_list:
             prefix = file_name.split('.')[-2]
             if is_debit_only(file_name):
                 debit_iif, _ = convert_to_iif(file_name, True)
+#                debit_iif['amount'] = debit_iif['amount'].apply(lambda x: round(x, 2))
                 if debit_iif is not None:
                     debit_iif.to_csv(prefix + '.iif')
             else:
                 debit_iif, credit_iif = convert_to_iif(file_name, False)
+                # debit_iif['amount'] = debit_iif['amount'].apply(lambda x: round(x, 2))
+                # credit_iif['amount'] = credit_iif['amount'].apply(lambda x: round(x, 2))
                 if debit_iif is not None:
                     debit_iif.to_csv(prefix + '_debit.iif')
                 if credit_iif is not None:
