@@ -109,14 +109,14 @@ def convert_all_files(path, is_cgl=False):
 
 
 
-# if __name__ == '__main__':
-#     path = '/Users/tonghaoyang/PycharmProjects/Weighted-Average-Costing-Solver2/quickbook/'
-#     pd.set_option('display.max_columns', None)
-#     # Set is_cgl as False if it is a quick book directory
-#     # convert_all_files(path + 'QB/', False)
-#
-#     # Set is_cgl as True if it is an 8949 directory
-#     convert_all_files(path + '8949/', True)
+if __name__ == '__main__':
+    path = '/Users/tonghaoyang/PycharmProjects/Weighted-Average-Costing-Solver2/quickbook/'
+    pd.set_option('display.max_columns', None)
+    # Set is_cgl as False if it is a quick book directory
+    convert_all_files(path + 'QB/', False)
+
+    # Set is_cgl as True if it is an 8949 directory
+    convert_all_files(path + '8949/', True)
 
     # file0 = path + '202110_Deposit_Withdrawal.xlsx'
     # res0_debit, res0_credit = convert_to_iif(file0)
