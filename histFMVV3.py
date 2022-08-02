@@ -35,7 +35,7 @@ async def lookupFMV_Kaiko(date, token_symbol, before, after):
     start_time = str(start_time.strftime('%Y-%m-%dT%H:%M:%SZ'))
     end_time = Time + timedelta(hours=after)
     end_time = str(end_time.strftime('%Y-%m-%dT%H:%M:%SZ'))
-    tx_url = f"https://us.market-api.kaiko.io/v1/data/trades.v1/spot_exchange_rate/{}/usd"
+    tx_url = "https://us.market-api.kaiko.io/v1/data/trades.v1/spot_exchange_rate/{}/usd"
     params = dict({"start_time": start_time,
                     "end_time": end_time,
                     "interval": "1m",
