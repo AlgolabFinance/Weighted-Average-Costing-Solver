@@ -18,18 +18,18 @@ def convert_to_iif(file_name, is_debit_only=False):
         print('Empty File Or Wrong Sheet Name: ' + file_name)
         return None, None
 
-    iif = pd.DataFrame({'specifier':['!TRNS', '!SPL', '!ENDTRANS'], 'date': ['DATE', 'DATE', ''], 'tx_type':['TRNSTYPE','TRNSTYPE', ''],
+    iif = pd.DataFrame({'specifier':['!TRNS', '!SPL', '!ENDTRNS'], 'date': ['DATE', 'DATE', ''], 'tx_type':['TRNSTYPE','TRNSTYPE', ''],
                          'doc_num': ['DOCNUM', 'DOCNUM', ''],
                         'account': ['ACCNT', 'ACCNT', ''],
                 'amount': ['AMOUNT', 'AMOUNT', ''], 'memo': ['MEMO', 'MEMO', ''], 'name': ['NAME', 'NAME', '']})
-    #trans = pd.DataFrame({'specifier':['TRANS'], 'date':[''], 'account':[''], 'docnum':[''], 'class':[''], 'amount':[''], 'amount_memo':['']})
+    #trans = pd.DataFrame({'specifier':['TRNS'], 'date':[''], 'account':[''], 'docnum':[''], 'class':[''], 'amount':[''], 'amount_memo':['']})
 
-    end_trans = pd.DataFrame({'specifier':['ENDTRANS'], 'date':[''], 'account':[''],
+    end_trans = pd.DataFrame({'specifier':['ENDTRNS'], 'date':[''], 'account':[''],
                               'tx_type':[''],'docnum':[''], 'class':[''], 'amount':[''], 'amount_memo':['']})
     debit_iif, credit_iif = iif.copy(), iif.copy()
     if debit_data is not None:
         for i, row in debit_data.iterrows():
-            specifier = 'TRANS'
+            specifier = 'TRNS'
             account = row['Account']
             date = parse(row['date'])
             tx_type = 'Deposit'
@@ -49,7 +49,7 @@ def convert_to_iif(file_name, is_debit_only=False):
 
     if credit_data is not None:
         for i, row in credit_data.iterrows():
-            specifier = 'TRANS'
+            specifier = 'TRNS'
             account = row['Account']
             date = parse(row['date'])
             tx_type = 'Check'
