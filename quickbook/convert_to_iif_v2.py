@@ -136,7 +136,8 @@ if __name__ == '__main__':
 
     # Set is_cgl as True if it is an 8949 directory
     # Must specify the mapping file
-    convert_all_files(path + '8949/', True, path + 'mapping.xlsx')
+    mapping_file_path = path + 'mapping.xlsx'
+    convert_all_files(path + '8949/', True, mapping_file_path)
 
 
 
