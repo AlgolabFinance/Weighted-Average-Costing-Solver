@@ -22,6 +22,7 @@ class CGL:
              'amount_changed': [], 'value_changed': [], 'previous_balance': [],
              'previous_value': [], 'txHash': [], 'timestamp': [], '_id': [], 'previous_movement': []})
 
+    # Get the latest balance of a certain asset under an account
     def get_latest_balance(self, account, asset):
         target_account_records = self.movement_tracker[(self.movement_tracker['account'] == account)
                                                        & (self.movement_tracker['asset'] == asset)]
@@ -33,6 +34,7 @@ class CGL:
             previous_movement_index = target_account_records.index.tolist()[-1]
         return amount, value_per_unit, previous_movement_index
 
+    # Add the newest movement to the movement tracker
     def update_movement_tracker(self, account, asset, amount_changed, value_changed, txHash,
                                 id, datetime, tx_type, cgl=0, proceeds=0):
         original_amount, original_value_per_unit, previous_movement_index = self.get_latest_balance(account, asset)
@@ -65,18 +67,13 @@ class CGL:
         temp_dict['proceeds'] = proceeds
         self.movement_tracker = pd.concat([self.movement_tracker, pd.DataFrame(temp_dict)], ignore_index=True)
 
-    # def find_opposite_deposit_account(self, txHash, amount, asset_type):
-    #     data = self.data
-    #     indexes = data[(data['txHash'] == txHash) & (data['debitAmount'] == amount) & (data['debitAsset'] == asset_type)].index.tolist()
-    #     if len(indexes) != 1:
-    #         raise Exception("Expected 1 corresponding deposit transaction but got " + str(len(indexes)))
-    #     target_index = indexes[0]
-    #     return target_index
 
     def read_data(self, file_name):
         self.data = pd.read_csv(file_name, dtype=str)
         # only keep pre8949 records
         self.data = self.data[(self.data['debitAccount'] != 'Transfer') & (self.data['creditAccount'] != 'Transfer')]
+
+        # Covert amount to Decimal
         self.data['creditAmount'] = self.data['creditAmount'].apply(Decimal)
         self.data['debitAmount'] = self.data['debitAmount'].apply(Decimal)
         self.data['histFMV'] = self.data['histFMV'].apply(Decimal)
@@ -85,14 +82,6 @@ class CGL:
         self.data['txFeeAssetFMV'] = self.data['txFeeAssetFMV'].apply(Decimal)
         self.data['processed'] = False
         self.data['Capital G&L'] = 0
-        # cat_txType = CategoricalDtype(
-        #     ['Buy', 'Deposit', 'Transfer', 'Convert', 'Trade', 'Withdrawal', 'Sell'],
-        #     ordered=True
-        # )
-        # self.data['txType'] = self.data['txType'].astype(cat_txType)
-        # self.data.sort_values(by=['datetime', 'txHash', 'txType'], inplace=True)
-        # self.data.reset_index(inplace=True)
-        # self.data['txType'] = self.data['txType'].astype(str)
         self.data['dr'] = np.NAN
         self.data['cr'] = np.NAN
         self.data.loc[self.data['txType'].isin(['Trade', 'Convert', 'Transfer']), 'dr'] = self.data['datetime'] \
@@ -101,18 +90,27 @@ class CGL:
         self.data.loc[self.data['txType'].isin(['Trade', 'Convert', 'Transfer']), 'cr'] = self.data['datetime'] \
                                                                                           + self.data['creditAccount'] + \
                                                                                           self.data['creditAsset']
+        # stack 'cr' and 'dr'. [cr, dr]'
         temp_df1 = self.data['cr']
         temp_df2 = self.data['dr']
         temp_df1.columns = ['pair']
         temp_df2.columns = ['pair']
         pivot = pd.concat([temp_df1, temp_df2], ignore_index=True)
         pivot.dropna(inplace=True)
+
+        # cr in pivot: number of records with a certain credit asset within one transaction.
+        # dr in pivot: number of records with a certain debit asset within one transaction.
         pivot = pd.DataFrame({'pair': pivot, 'cr': 0, 'dr': 0, 'check': 0}).drop_duplicates()
         pivot.reset_index(inplace=True, drop=True)
         for i, row in pivot.iterrows():
             pivot.loc[i, 'cr'] = self.data[self.data['cr'] == pivot.loc[i, 'pair']].count()['cr']
             pivot.loc[i, 'dr'] = self.data[self.data.dr == pivot.loc[i, 'pair']].count()['dr']
+        # If one transation contains both inflow and outflow of an asset,
+        # inflow should be put first to avoid negative balance
+        # If one asset appears both in the credit side and debit side, the check will be set to one.
         pivot.loc[(pivot.dr > 0) & (pivot.cr > 0), 'check'] = 1
+
+        # merge pivot with data, so that we can get the count of debit asset and credit asset in data.
         self.data = pd.merge(self.data, pivot[['pair', 'check']], how='left', left_on='dr',
                              right_on='pair').drop_duplicates()
         self.data.rename(columns={'check': 'check_dr'}, inplace=True)
@@ -124,6 +122,8 @@ class CGL:
         self.data.loc[:, 'check_cr'].fillna(0, inplace=True)
         self.data['seq_no'] = ''
         self.data['order_no'] = ''
+        # seq number represents the priority within a transaction of a record in our ledger
+        # 1. Buy 2.Deposit 3.Trade, Convert, Transfer 4.Withdrawal 5. Sell
         self.data.loc[self.data['txType'] == 'Buy', 'order_no'] = '1'
         self.data.loc[self.data['txType'] == 'Deposit', 'order_no'] = '2'
         self.data.loc[self.data['txType'].isin(['Trade', 'Convert', 'Transfer']), 'order_no'] = '3'
@@ -132,6 +132,13 @@ class CGL:
         self.data.loc[:, 'seq_no'] = self.data.datetime + '-' + self.data.order_no
         self.data[['check_cr', 'check_dr']] = self.data[['check_cr', 'check_dr']].astype(int)
         self.data['check_count'] = self.data['check_cr'] + self.data['check_dr']
+
+        # we need to further sort for the records that have check_cr = 1 and check_dr = 1, which means the
+        # credit asset of this record is also the debit asset of another record within the same transaction. And the
+        # debit asset of the record is the credit asset of another records within the same transacton.
+        # The idea is to sort these records again and set the check_dr to 2 to ensure that the debit of an asset is
+        # always prior to the credit after sorting.
+
         check_set = self.data[self.data['check_count'] == 2]
         temp_df3 = check_set['cr']
         temp_df4 = check_set['dr']
@@ -144,17 +151,23 @@ class CGL:
             pivot_check.loc[i, 'cr'] = check_set[check_set['cr'] == pivot_check.loc[i, 'pair']].count()['cr']
             pivot_check.loc[i, 'dr'] = check_set[check_set['dr'] == pivot_check.loc[i, 'pair']].count()['dr']
         pivot_check.loc[(pivot_check.cr > 0) & (pivot_check.dr > 0), 'check'] = 1
-        # print(pivot_check)
         self.data = pd.merge(self.data, pivot_check[['pair', 'check']], how='left', left_on='dr',
                              right_on='pair').drop_duplicates()
         self.data.loc[self.data.check == 1, 'check_dr'] = 2
+
+        # Credits come before the debits
         self.data.sort_values('check_dr', inplace=True, ascending=False)
         self.data.sort_values('check_cr', inplace=True, ascending=True)
+
+        # Sort based on the priority of transactions.
         self.data.sort_values('seq_no', inplace=True)
         self.data.drop('pair', inplace=True, axis=1)
-        # print(pivot)
-        # print(self.data)
 
+    # CGL = proceeds - cost
+    # For a sell, proceeds = USD spent, which is right the debit Amount
+    # For a trade, proceeds = amount * market price when the transaction happened
+
+    # Cost for both sell and trade is based on the value_per_unit from the movement_tracker
     def calculate_CGL(self, record):
         tx_type = record.txType
         if tx_type not in ['Trade', 'Sell']:
@@ -179,23 +192,19 @@ class CGL:
         else:
             proceeds = debit_amount
         balance_amount, value_per_unit, previous_movement_index = self.get_latest_balance(credit_account, credit_asset)
-        # if credit_amount > balance_amount:
-        #     raise Exception(id + " :Negative Balance for account: " + str(credit_asset) + ". Current balance: "
-        #                     + str(balance_amount) + '  Credit Amount: ' + str(credit_amount))
         if credit_amount > balance_amount:
             cost = balance_amount * value_per_unit + (credit_amount - balance_amount) * credit_asset_fmv
         else:
             cost = credit_amount * value_per_unit
         CGL = proceeds - cost
-        # self.add_value_to_account(credit_account, credit_asset, -1*credit_amount, -1*cost)
         self.update_movement_tracker(credit_account, credit_asset, -1 * credit_amount, -1 * cost, tx_hash, id, datetime,
                                      tx_type, CGL, proceeds)
         if tx_type == 'Trade':
-            # self.add_value_to_account(debit_account, debit_asset, debit_amount, proceeds)
             self.update_movement_tracker(debit_account, debit_asset, debit_amount, proceeds, tx_hash, id, datetime,
                                          tx_type)
         return CGL
 
+    # Iterate through the ledger to calculate gain and loss.
     def execute_calculation(self):
         self.data.reset_index(inplace=True, drop=True)
         index = 0
@@ -220,7 +229,8 @@ class CGL:
             if tx_type not in ('Trade', 'Deposit', 'Withdrawal', 'Buy', 'Sell', 'Convert', 'Transfer'):
                 raise Exception("Invalid txType: " + tx_type)
 
-            # add offset income
+            # If there is an incoming negative balance to our ledger,
+            # we add an offset income to get rid of negative balance.
             if tx_type in ('Withdrawal', 'Convert', 'Transfer', 'Trade', 'Sell'):
                 balance, value_per_unit, _ = self.get_latest_balance(credit_account, credit_asset)
                 if balance < credit_amount and credit_account in wallet_list:
@@ -236,6 +246,8 @@ class CGL:
                     new_row['debitAssetFMV'] = record['creditAssetFMV']
                     new_row['histFMV'] = new_row['debitAssetFMV']
                     new_row['creditAssetFMV'] = new_row['debitAssetFMV']
+
+                    # Insert the offset income to current index
                     self.data.loc[index - 0.5] = new_row
                     self.data = self.data.sort_index().reset_index(drop=True)
                     max_index = self.data.index.to_list()[-1]
@@ -245,10 +257,12 @@ class CGL:
                 cgl = self.calculate_CGL(record)
                 self.data.loc[index, 'Capital G&L'] = cgl
             elif tx_type == 'Withdrawal':
-                # balance, value_per_unit, _ = self.get_latest_balance(credit_account, credit_asset)
                 value_changed = 0
+
+                # May be removed, because we already introduce offset income to get rid of negative balance.
                 if balance < credit_amount:
                     value_changed = -1 * (value_per_unit * balance + (credit_amount - balance) * credit_asset_fmv)
+
                 else:
                     value_changed = -1 * value_per_unit * credit_amount
                 self.update_movement_tracker(credit_account, credit_asset, -1 * credit_amount,
@@ -262,16 +276,15 @@ class CGL:
                 self.update_movement_tracker(debit_account, debit_asset, debit_amount, credit_amount
                                              , tx_hash, id, datetime, tx_type)
             elif tx_type == 'Convert':
-                # balance, value_per_unit, _ = self.get_latest_balance(credit_account, credit_asset)
-                # if balance < credit_amount:
-                #     raise Exception("Negative Balance for account: " + str(debit_asset) + ". Current balance: "
-                #                     + str(balance) + '  Credit Amount: ' + str(credit_amount))
+
+                # May be removed, because we already introduce offset income to get rid of negative balance.
                 if balance < credit_amount:
                     value_changed = value_per_unit * balance + (credit_amount - balance) * credit_asset_fmv
                     self.update_movement_tracker(credit_account, credit_asset, -1 * credit_amount,
                                                  -1 * value_changed, tx_hash, id, datetime, tx_type)
                     self.update_movement_tracker(debit_account, debit_asset, debit_amount, value_changed,
                                                  tx_hash, id, datetime, tx_type)
+
                 else:
                     self.update_movement_tracker(credit_account, credit_asset, -1 * credit_amount,
                                                  -1 * value_per_unit * credit_amount, tx_hash, id, datetime, tx_type)
@@ -285,10 +298,6 @@ class CGL:
                 if balance < credit_amount:
                     value_changed = value_per_unit * balance + (
                             credit_amount - balance) * credit_asset_fmv
-                    # self.update_balance_tracker(credit_account, credit_asset, -1 * credit_amount,
-                    #                             -1 * value_changed, tx_hash, id, datetime)
-                    # self.update_balance_tracker(debit_account, debit_asset, credit_amount,
-                    #                             value_changed, tx_hash, id, datetime)
                 else:
                     value_changed = value_per_unit * credit_amount
                 self.update_movement_tracker(credit_account, credit_asset, -1 * credit_amount,
@@ -302,14 +311,9 @@ class CGL:
         self.data.to_csv(file_name)
         self.movement_tracker.to_csv('movement_tracker.csv')
 
+    # Generate a transaction report from the tracker for the given period. It is a formatted movement tracker in nature.
     def generate_transactions_report(self, movement_tracker_df, end_year, end_month,
                                      end_day, start_year=2001, start_month=1, start_day=1):
-        # tx_report = pd.DataFrame(
-        #     {'Account': [], 'Asset': [], 'Datetime': [], 'Current Balance': [],
-        #      'Average Value': [], 'Total Value': [],
-        #      'Balance Before Change': [], 'Total Value Before Change': [], 'Balance Changed': [],
-        #      'Value Changed': []})
-        # tracker_book = pd.read_csv('movement_tracker.csv')
         end_date = dt.datetime(end_year, end_month, end_day, 23, 59, 59)
         end_date = end_date.strftime('%Y-%m-%dT%H:%M:%S.000Z')
         start_date = dt.datetime(start_year, start_month, start_day, 0, 0, 0)
@@ -330,6 +334,8 @@ class CGL:
         tx_report.reset_index(inplace=True)
         return tx_report
 
+    # Generate a series of transaction report from the tracker for every natural year between
+    # the given period. It is a formatted movement tracker in nature.
     def generate_transactions_report_by_year(self, movement_tracker_df, start_year, end_year):
         min_datetime = movement_tracker_df.loc[0, 'datetime']
         min_year = int(min_datetime[0:4])
@@ -345,7 +351,7 @@ class CGL:
             previous_report.to_csv(str(start_year) + '-tx-report.csv')
             start_year += 1
 
-
+    # Generate a CGL report from the tracker for the given period.
     def generate_cgl_report(self, movement_tracker_df, end_year, end_month, end_day,
                                        start_year=2001, start_month=1, start_day=1):
         end_date = dt.datetime(end_year, end_month, end_day, 23, 59, 59)
@@ -363,14 +369,6 @@ class CGL:
         cgl_report['amount_changed'] = cgl_report['amount_changed'].apply(abs)
         cgl_report['value_changed'] = cgl_report['value_changed'].abs()
         cgl_report['proceeds_per_coin'] = cgl_report['proceeds'] / cgl_report['amount_changed']
-        # cgl_report['purchase_date'] = np.NAN
-        # for i, row in cgl_report.iterrows():
-        #     account = row.account
-        #     asset = row.asset
-        #     cgl_report.loc[i, 'purchase_date'] = \
-        #         cgl_book[(cgl_book['account'] == account) & (cgl_book['asset'] == asset)
-        #                  & (cgl_book['previous_balance'] == 0)]['datetime'].to_list()[-1]
-
         cgl_report.set_index(['account', 'asset'], inplace=True)
         cgl_report.sort_index(inplace=True)
         cgl_report.reset_index(inplace=True)
@@ -392,6 +390,8 @@ class CGL:
              'BASIS', 'PROCEEDS', 'CAPITAL GAIN(LOSS)', 'OPENING BALANCE', '_ID']]
         return cgl_report
 
+    # Generate a series of CGL report from the tracker for every natural year between
+    # the given period. It is a formatted movement tracker in nature.
     def generate_cgl_report_by_year(self, movement_tracker_df, start_year, end_year):
         min_datetime = movement_tracker_df.loc[0, 'datetime']
         min_year = int(min_datetime[0:4])
@@ -408,6 +408,8 @@ class CGL:
                 report.to_csv(str(start_year) + '-cgl-report.csv')
             start_year += 1
 
+    # To get unrealized report, we need to get the current market price from Kaiko and the latest value from the
+    # movement tracker
     def generate_unrealized_cgl_report(self, movement_tracker_df, end_year, end_month, end_day,
                                        start_year=2001, start_month=1, start_day=1):
         end_date = dt.datetime(end_year, end_month, end_day, 23, 59, 59)
@@ -417,17 +419,22 @@ class CGL:
         dataset = movement_tracker_df[(movement_tracker_df.datetime <= end_date)]
         grouped = dataset.groupby(['account', 'asset'])
         latest_balances = None
+
+        # Find the latest record of every combination of asset and account from movement tracker,
+        # from which we can further get the total basis of every asset.
         for (account, asset), group in grouped:
             if latest_balances is None:
                 latest_balances = group.iloc[-1].to_frame().T
             else:
                 latest_balances = pd.concat([latest_balances, group.iloc[-1].to_frame().T], ignore_index=True)
-        print(latest_balances)
+
         unrealized_report = latest_balances[['asset', 'account', 'current_balance', 'value_per_unit', 'current_value']]
         unrealized_report = unrealized_report.sort_values(['asset'], ignore_index=True)
         unrealized_report['FMV PER UNIT'] = np.nan
         unrealized_report['TOTAL USD VALUE'] = np.nan
         unrealized_report['UNREALIZED GAIN (LOSS)'] = np.nan
+
+        # Maximum trial to get market price.
         maximum_trial = 4
         trial = 0
         row_number = len(unrealized_report)
@@ -443,6 +450,8 @@ class CGL:
                 continue
             try:
                 unrealized_report.loc[i, 'FMV PER UNIT'], _ = lookupFMV_Kaiko(end_date, token_symbol, 8, 8)
+
+            # Handle potential exceptions when getting data from Kaiko
             except Exception as err:
                 print(err)
                 if trial < maximum_trial:
@@ -455,14 +464,13 @@ class CGL:
             else:
                 price_dict[token_symbol] = unrealized_report.loc[i, 'FMV PER UNIT']
                 i += 1
+        # Format the report.
         unrealized_report.rename(columns={'account': 'COIN LOCATION', 'asset': 'ASSET', 'current_balance': 'TOTAL BALANCE',
                                    'value_per_unit': 'BASIS PER UNIT', 'current_value': 'BASIS BALANCE'}, inplace=True)
         unrealized_report['TOTAL USD VALUE'] = unrealized_report['TOTAL BALANCE'].astype('float') * \
                                            unrealized_report['FMV PER UNIT'].astype('float')
         unrealized_report['UNREALIZED GAIN (LOSS)'] = unrealized_report['TOTAL USD VALUE'] - unrealized_report['BASIS BALANCE']
         unrealized_report['OPENING BALANCE'] = 0
-        # unrealized_report['OPENING BASIS PER UNIT'] = 0
-        # unrealized_report['OPENING BASIS BALANCE'] = 0
         prior_dataset = movement_tracker_df[movement_tracker_df['datetime'] <= start_date]
         for i, row in unrealized_report.iterrows():
             record = prior_dataset[(prior_dataset['account'] == row['COIN LOCATION']) &
@@ -473,6 +481,8 @@ class CGL:
         print(unrealized_report)
         return unrealized_report
 
+    # Generate a series of unrealized reports from the tracker for every natural year between
+    # the given period.
     def generate_unrealized_report_by_year(self, movement_tracker_df, start_year, end_year):
         min_datetime = movement_tracker_df.loc[0, 'datetime']
         min_year = int(min_datetime[0:4])

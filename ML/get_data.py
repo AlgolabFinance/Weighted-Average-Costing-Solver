@@ -5,6 +5,7 @@ import pandas as pd
 from decimal import Decimal
 
 
+
 def preprocess_data(file_name):
     data = pd.read_excel(file_name, sheet_name='Raw')
     if 'rule' in data.columns:

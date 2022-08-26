@@ -9,7 +9,11 @@ from sklearn.metrics import accuracy_score, classification_report, confusion_mat
 from sklearn.metrics import roc_curve, roc_auc_score
 
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import AdaBoostClassifier
 from sklearn.model_selection import KFold
+from sklearn.decomposition import PCA
+
+from imblearn.over_sampling import RandomOverSampler
 
 pd.set_option('display.max_columns', None)
 pd.set_option('display.max_rows', None)
@@ -46,16 +50,34 @@ for rule in rules:
 # Drop insufficient category
 dataset = dataset[dataset['count'] > 9]
 
-print(len(dataset.drop_duplicates(subset=['rule'])[['rule', 'count']]))
+# Drop Bridge, Group Investment, Other, and Unknown
+dataset.loc[dataset['rule'] == 'BRIDGE'] = np.nan
+dataset.loc[dataset['rule'] == 'GROUP INVESTMENT'] = np.nan
+dataset.loc[dataset['rule'] == 'UNKNOWN'] = np.nan
+dataset.loc[dataset['rule'] == 'OTHER'] = np.nan
+dataset.dropna(subset=['rule'], inplace=True)
+
+temp = dataset.drop_duplicates(subset=['rule'])[['rule', 'count']]
+print(len(temp))
+temp.to_csv('classes.csv')
 dataset.drop(columns='count', inplace=True)
 X = dataset.iloc[:, 2:-1]
 y = dataset.iloc[:, -1]
 print(len(X['method_id'].drop_duplicates()))
+
+ros = RandomOverSampler(random_state=0)
+X, y = ros.fit_resample(X, y)
+
+pca = PCA(n_components=10)
 X = pd.get_dummies(X, drop_first=True)
-# print(X.columns)
-print(len(X))
-# print(y)
-# print(X.head(1))
+
+# Apply PCA 0.736
+X = pd.DataFrame(pca.fit_transform(X))
+print('Variance ratio of components:', pca.explained_variance_ratio_)
+print('Variance ratio of value:', pca.explained_variance_)
+print(sum(pca.explained_variance_ratio_))
+
+print(X.shape)
 # Split training set, test set
 x_train, x_test, y_train, y_test = train_test_split(X, y, test_size=0.20, random_state=5, stratify=y)
 
@@ -70,9 +92,7 @@ y_pred = clf.predict(x_test)
 
 # Evaluate Model
 accuracy = np.round(accuracy_score(y_test, y_pred), 3)
-print("Accuracy of the new classifier =", accuracy)
-# print(confusion_matrix(y_test, y_pred))
-# print(classification_report(y_test, y_pred))
+print("Accuracy of the decision tree =", accuracy)
 report = classification_report(y_test, y_pred, output_dict=True)
 pd.DataFrame(report).T.to_excel('report_new.xlsx')
 
@@ -103,12 +123,20 @@ auc_score = roc_auc_score(y_test, predictions, multi_class='ovr')
 
 print('auc_score of RFC: ' + str(auc_score))
 
+adc = AdaBoostClassifier(random_state=5, n_estimators=100)
+adc.fit(x_train, y_train)
+y_pred_adc = rfc.predict(x_test)
+accuracy = np.round(accuracy_score(y_test, y_pred_rfc), 3)
+print('Accuracy of Boosting: ' + str(accuracy))
+
 k = 5
 acc_scores = []
 auc_scores = []
 kf = KFold(n_splits=k, shuffle=True, random_state=3)
 X.reset_index(inplace=True, drop=True)
 y = y.to_frame().reset_index(drop=True)
+print(X.shape)
+print(y.shape)
 
 for train_index, test_index in kf.split(X):
     X_train, X_test = X.iloc[train_index, :], X.iloc[test_index, :]
